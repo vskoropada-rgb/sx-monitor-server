@@ -1,0 +1,26 @@
+name: Deploy — Dev
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Запускається тільки якщо задані секрети dev-сервера.
+    # Якщо dev-сервера немає — просто не додавай DEV_SERVER_HOST в Secrets.
+    if: ${{ vars.DEV_DEPLOY_ENABLED == 'true' }}
+    steps:
+      - name: Deploy to dev server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          script: |
+            cd /opt/sx-monitor-server
+            git fetch origin
+            git checkout dev
+            git pull origin dev
+            docker compose up -d --build
+            docker compose ps

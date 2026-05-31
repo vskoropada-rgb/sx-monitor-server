@@ -1,11 +1,14 @@
 # install.ps1 - SX Monitor agent bootstrap installer (client-server)
 #
-# PowerShell 3.0+:
-#   irm "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/claude/project-migration-EPhSa/agent/install.ps1" | iex
+# Прод-агент (main):
+#   irm "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/main/agent/install.ps1" | iex
+#
+# Тест-агент (dev):
+#   irm "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/dev/agent/install.ps1" | iex
 #
 # PowerShell 2.0 / Windows 2008 R2:
 #   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-#   (New-Object Net.WebClient).DownloadString("https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/claude/project-migration-EPhSa/agent/install.ps1") | iex
+#   (New-Object Net.WebClient).DownloadString("<URL вище>") | iex
 
 $ErrorActionPreference = "SilentlyContinue"
 
@@ -15,7 +18,7 @@ $ErrorActionPreference = "SilentlyContinue"
 # Old OS (2008 R2) may have outdated root certs — bypass SSL validation
 [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 
-$REPO_RAW    = "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/claude/project-migration-EPhSa/agent"
+$REPO_RAW    = "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/main/agent"
 $DEFAULT_DIR = "D:\setup\monitoring-sc"
 
 $FILES = @(

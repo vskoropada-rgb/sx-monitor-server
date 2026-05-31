@@ -1205,7 +1205,7 @@ function Test-Telegram {
 function Update-FromGitHub {
     Show-Header "U. Оновлення з GitHub"
 
-    $REPO_RAW = "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/claude/project-migration-EPhSa/agent"
+    $REPO_RAW = "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/main/agent"
 
     $files = @(
         "agent.py", "register_agent.py", "config.py",

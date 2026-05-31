@@ -1,4 +1,4 @@
-name: Deploy to server
+name: Deploy — Production
 
 on:
   push:
@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - name: Deploy to production EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -16,6 +16,8 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /opt/sx-monitor-server
+            git fetch origin
+            git checkout main
             git pull origin main
             docker compose up -d --build
             docker compose ps
