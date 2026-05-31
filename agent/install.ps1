@@ -15,9 +15,6 @@ $ErrorActionPreference = "SilentlyContinue"
 # TLS 1.2 — required for GitHub
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Old OS (2008 R2) may have outdated root certs — bypass SSL validation
-[Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-
 $REPO_RAW    = "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/main/agent"
 $DEFAULT_DIR = "D:\setup\monitoring-sc"
 
