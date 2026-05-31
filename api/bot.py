@@ -21,9 +21,9 @@ logger = logging.getLogger("bot")
 BASE_URL = f"https://api.telegram.org/bot{settings.tg_bot_token}"
 
 
-def _api(method: str, payload: dict) -> dict:
+def _api(method: str, payload: dict, timeout: int = 10) -> dict:
     try:
-        r = requests.post(f"{BASE_URL}/{method}", json=payload, timeout=10)
+        r = requests.post(f"{BASE_URL}/{method}", json=payload, timeout=timeout)
         return r.json()
     except Exception as e:
         logger.error("%s error: %s", method, e)
@@ -249,7 +249,8 @@ def run():
     while True:
         try:
             result = _api("getUpdates", {"offset": offset, "timeout": 30,
-                                         "allowed_updates": ["callback_query", "message"]})
+                                         "allowed_updates": ["callback_query", "message"]},
+                          timeout=35)
             if not result.get("ok"):
                 desc = result.get("description", "")
                 if "409" in desc or "conflict" in desc.lower():
