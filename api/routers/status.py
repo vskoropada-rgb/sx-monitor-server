@@ -16,30 +16,49 @@ logger = logging.getLogger("status")
 router = APIRouter(prefix="/api", tags=["status"])
 
 
-def _create_forum_topic(name: str) -> str | None:
-    """
-    Створює Forum Topic у Telegram-групі під назвою компанії і повертає
-    message_thread_id (як рядок). Повертає None при помилці.
-    """
-    token    = settings.tg_bot_token
-    group_id = settings.tg_group_id
-    if not token or not group_id:
-        logger.warning("createForumTopic: TG_BOT_TOKEN/TG_GROUP_ID не задані")
-        return None
+def _tg_post(method: str, payload: dict) -> dict:
+    token = settings.tg_bot_token
+    if not token:
+        return {"ok": False}
     try:
         r = requests.post(
-            f"https://api.telegram.org/bot{token}/createForumTopic",
-            json={"chat_id": group_id, "name": name},
-            timeout=10,
+            f"https://api.telegram.org/bot{token}/{method}",
+            json=payload, timeout=10,
         )
-        data = r.json()
-        if not data.get("ok"):
-            logger.error("createForumTopic помилка: %s", data.get("description"))
-            return None
-        return str(data["result"]["message_thread_id"])
+        return r.json()
     except Exception as e:
-        logger.error("createForumTopic виняток: %s", e)
+        logger.error("%s виняток: %s", method, e)
+        return {"ok": False}
+
+
+def _create_forum_topic(name: str) -> str | None:
+    """Створює Forum Topic і повертає message_thread_id або None."""
+    group_id = settings.tg_group_id
+    if not settings.tg_bot_token or not group_id:
+        logger.warning("createForumTopic: TG_BOT_TOKEN/TG_GROUP_ID не задані")
         return None
+    data = _tg_post("createForumTopic", {"chat_id": group_id, "name": name})
+    if not data.get("ok"):
+        logger.error("createForumTopic помилка: %s", data.get("description"))
+        return None
+    return str(data["result"]["message_thread_id"])
+
+
+def _send_registration_message(name: str, topic_id: str, action: str):
+    """Відправляє повідомлення в топік після реєстрації агента."""
+    group_id = settings.tg_group_id
+    if not settings.tg_bot_token or not group_id or not topic_id:
+        return
+    emoji = "🆕" if action == "created" else "🔄"
+    text = f"{emoji} <b>{name}</b>\nАгент {'зареєстровано' if action == 'created' else 'оновлено'}. Моніторинг активний."
+    data = _tg_post("sendMessage", {
+        "chat_id": group_id,
+        "message_thread_id": int(topic_id),
+        "text": text,
+        "parse_mode": "HTML",
+    })
+    if not data.get("ok"):
+        logger.warning("sendMessage до топіку %s помилка: %s", topic_id, data.get("description"))
 
 
 
@@ -104,6 +123,7 @@ def register_server(
         elif not existing.tg_topic_id:
             existing.tg_topic_id = _create_forum_topic(existing.name)
         db.commit()
+        _send_registration_message(existing.name, existing.tg_topic_id, "updated")
         return {"ok": True, "action": "updated", "tg_topic_id": existing.tg_topic_id}
 
     # Нова реєстрація: якщо топік не передано — створюємо автоматично
@@ -118,4 +138,5 @@ def register_server(
     )
     db.add(server)
     db.commit()
+    _send_registration_message(name, topic_id, "created")
     return {"ok": True, "action": "created", "tg_topic_id": topic_id}
