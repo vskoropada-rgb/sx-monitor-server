@@ -346,6 +346,10 @@ def update_agent(branch: str = "main") -> Tuple[bool, str]:
         return False, f"Оновлено {len(updated)}, помилки: {'; '.join(failed[:3])}"
 
     logger.info("update_agent: оновлено %d файлів, перезапуск…", len(updated))
-    # Watchdog перезапустить процес після виходу
-    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__.replace("actions.py", "agent.py"))])
-    return True, f"Оновлено {len(updated)} файлів"
+    agent_path = os.path.abspath(__file__.replace("actions.py", "agent.py"))
+    import subprocess as _sp
+    _sp.Popen(
+        [sys.executable, agent_path],
+        creationflags=getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+    sys.exit(0)
