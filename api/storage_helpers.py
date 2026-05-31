@@ -18,7 +18,32 @@ def can_send_alert(db: Session, server_id: str, alert_key: str, cooldown_min: in
     )
     if not row:
         return True
+    if row.acked_until and row.acked_until > datetime.utcnow():
+        return False
     return datetime.utcnow() - row.sent_at > timedelta(minutes=cooldown_min)
+
+
+def ack_alert(db: Session, server_id: str, alert_key: str, hours: int):
+    """Заглушує алерт на вказану кількість годин."""
+    row = (
+        db.query(Alert)
+        .filter(Alert.server_id == server_id, Alert.alert_key == alert_key)
+        .order_by(Alert.sent_at.desc())
+        .first()
+    )
+    until = datetime.utcnow() + timedelta(hours=hours)
+    if row:
+        row.acked_until = until
+    else:
+        db.add(Alert(
+            server_id=server_id,
+            alert_key=alert_key,
+            alert_type="ack",
+            severity="info",
+            message=f"acked for {hours}h",
+            acked_until=until,
+        ))
+    db.commit()
 
 
 def record_alert(db: Session, server_id: str, alert_key: str,

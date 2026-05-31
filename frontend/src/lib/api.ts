@@ -36,6 +36,14 @@ export interface ServerOverview {
     size_mb: number | null;
   };
   reboot_required: boolean;
+  agent_version: string | null;
+  agent_outdated: boolean;
+}
+
+export interface HistoryPoint {
+  time: string;
+  cpu?: number;
+  ram?: number;
 }
 
 export interface SentAlert {
@@ -72,6 +80,9 @@ export interface ServerDetail {
   online: boolean;
   last_seen: string | null;
   maintenance_until: string | null;
+  agent_version: string | null;
+  agent_outdated: boolean;
+  latest_agent_version: string;
   metrics: Record<string, any>;
   recent_alerts: Array<{ severity: string; message: string; sent_at: string | null }>;
   recent_commands: Array<{
@@ -91,6 +102,12 @@ export const api = {
     req<{ sent: SentAlert[]; pending: PendingAlert[] }>("/api/dashboard/alerts"),
   commands: () => req<CommandEntry[]>("/api/dashboard/commands"),
   serverDetail: (id: string) => req<ServerDetail>(`/api/dashboard/servers/${id}`),
+  serverHistory: (id: string, hours: number) =>
+    req<HistoryPoint[]>(`/api/dashboard/servers/${id}/history?hours=${hours}`),
+  serverHistoryRange: (id: string, start: string, end: string) =>
+    req<HistoryPoint[]>(
+      `/api/dashboard/servers/${id}/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    ),
   logout: () =>
     fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }),
 };

@@ -187,6 +187,22 @@ def handle_callback(update: dict):
 
     _api("answerCallbackQuery", {"callback_query_id": cb["id"]})
 
+    # ack|server_id|hours|alert_key  — окремий формат, не через _get_server_by_callback
+    if data.startswith("ack|"):
+        parts = data.split("|", 3)
+        if len(parts) == 4:
+            _, srv_id, hours_str, alert_key = parts
+            db: Session = SessionLocal()
+            try:
+                import storage_helpers as _sh
+                _sh.ack_alert(db, srv_id, alert_key, int(hours_str))
+            finally:
+                db.close()
+            _send(chat_id,
+                  f"✅ Алерт <b>{alert_key}</b> заглушено на {hours_str} год.",
+                  topic_id, message_id=message_id)
+        return
+
     server, action = _get_server_by_callback(data)
     if not server:
         _send(chat_id, "❌ Сервер не знайдено", topic_id, message_id=message_id)

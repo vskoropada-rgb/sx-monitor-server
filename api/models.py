@@ -10,13 +10,14 @@ from database import Base
 class Server(Base):
     __tablename__ = "servers"
 
-    id         = Column(String, primary_key=True)   # SERVER_ID з агента
-    name       = Column(String, nullable=False)      # COMPANY_NAME
-    api_key    = Column(String, nullable=False, unique=True)
-    tg_topic_id = Column(String)                    # Telegram Forum Topic
+    id                = Column(String, primary_key=True)
+    name              = Column(String, nullable=False)
+    api_key           = Column(String, nullable=False, unique=True)
+    tg_topic_id       = Column(String)
     maintenance_until = Column(DateTime, nullable=True)
-    last_seen  = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    agent_version     = Column(String, nullable=True)
+    last_seen         = Column(DateTime)
+    created_at        = Column(DateTime, default=datetime.utcnow)
 
 
 class Metric(Base):
@@ -39,13 +40,14 @@ class Alert(Base):
         Index("idx_alerts_server_key_time", "server_id", "alert_key", "sent_at"),
     )
 
-    id         = Column(Integer, primary_key=True, autoincrement=True)
-    server_id  = Column(String, ForeignKey("servers.id"), nullable=False)
-    alert_key  = Column(String, nullable=False)
-    alert_type = Column(String)
-    severity   = Column(String, nullable=False)
-    message    = Column(Text)
-    sent_at    = Column(DateTime, default=datetime.utcnow)
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    server_id   = Column(String, ForeignKey("servers.id"), nullable=False)
+    alert_key   = Column(String, nullable=False)
+    alert_type  = Column(String)
+    severity    = Column(String, nullable=False)
+    message     = Column(Text)
+    sent_at     = Column(DateTime, default=datetime.utcnow)
+    acked_until = Column(DateTime, nullable=True)
 
 
 class PendingAlert(Base):

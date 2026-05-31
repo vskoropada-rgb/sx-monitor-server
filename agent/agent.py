@@ -43,6 +43,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent")
 
+AGENT_VERSION = "1.2.0"
+
 try:
     import requests
 except ImportError:
@@ -113,6 +115,7 @@ def collect_metrics(config: dict) -> dict:
         except Exception as e:
             logger.error("filter blocked ips: %s", e)
 
+    metrics["agent_version"] = AGENT_VERSION
     return metrics
 
 

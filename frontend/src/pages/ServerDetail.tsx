@@ -1,6 +1,8 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "@/lib/api";
+import type { HistoryPoint } from "@/lib/api";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { UsageBar } from "@/components/ui/Stat";
@@ -16,7 +18,19 @@ import {
   Terminal,
   Bell,
   Database,
+  BarChart2,
+  Download,
 } from "lucide-react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +69,11 @@ function maintenanceTime(iso: string): string {
   return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
 }
 
+function chartTime(iso: string): string {
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+}
+
 // ── sub-sections ───────────────────────────────────────────────────────────────
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -65,6 +84,233 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-muted">{children}</p>;
+}
+
+// ── chart section ──────────────────────────────────────────────────────────────
+
+function MetricsChart({ serverId }: { serverId: string }) {
+  const [hours, setHours] = useState<1 | 4 | 24>(1);
+
+  const { data = [], isLoading } = useQuery({
+    queryKey: ["serverHistory", serverId, hours],
+    queryFn: () => api.serverHistory(serverId, hours),
+    refetchInterval: 60000,
+  });
+
+  const chartData = data.map((p: HistoryPoint) => ({
+    ...p,
+    label: chartTime(p.time),
+  }));
+
+  const labelStep = Math.max(1, Math.floor(chartData.length / 8));
+  const tickFormatter = (_: string, index: number) =>
+    index % labelStep === 0 ? chartData[index]?.label ?? "" : "";
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-accent" />
+          <span className="font-semibold">CPU & RAM</span>
+        </div>
+        <div className="flex gap-1">
+          {([1, 4, 24] as const).map((h) => (
+            <button
+              key={h}
+              onClick={() => setHours(h)}
+              className={cn(
+                "px-2 py-0.5 text-xs rounded",
+                hours === h
+                  ? "bg-accent text-bg font-semibold"
+                  : "text-muted hover:text-text"
+              )}
+            >
+              {h}г
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardBody>
+        {isLoading ? (
+          <div className="h-48 flex items-center justify-center text-muted text-sm">
+            Завантаження…
+          </div>
+        ) : chartData.length === 0 ? (
+          <EmptyNote>Даних ще немає</EmptyNote>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: "#6b7280" }}
+                tickFormatter={tickFormatter}
+                interval={0}
+              />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#6b7280" }} unit="%" />
+              <Tooltip
+                contentStyle={{ background: "#1a1a2e", border: "1px solid #374151", borderRadius: 6 }}
+                labelStyle={{ color: "#9ca3af" }}
+                formatter={(val) => [`${val}%`]}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Line
+                type="monotone"
+                dataKey="cpu"
+                name="CPU"
+                stroke="#22d3ee"
+                dot={false}
+                strokeWidth={1.5}
+                isAnimationActive={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="ram"
+                name="RAM"
+                stroke="#f97316"
+                dot={false}
+                strokeWidth={1.5}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ── PDF export section ─────────────────────────────────────────────────────────
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+function weekAgo() {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return d.toISOString().slice(0, 10);
+}
+
+function ExportSection({
+  serverId,
+  serverName,
+  recentAlerts,
+}: {
+  serverId: string;
+  serverName: string;
+  recentAlerts: Array<{ severity: string; message: string; sent_at: string | null }>;
+}) {
+  const [from, setFrom] = useState(weekAgo);
+  const [to, setTo] = useState(today);
+  const [loading, setLoading] = useState(false);
+
+  async function handleExport() {
+    setLoading(true);
+    try {
+      const startISO = new Date(from + "T00:00:00").toISOString();
+      const endISO = new Date(to + "T23:59:59").toISOString();
+      const history = await api.serverHistoryRange(serverId, startISO, endISO);
+
+      const { default: jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
+
+      const doc = new jsPDF();
+
+      doc.setFontSize(16);
+      doc.text(`Звіт: ${serverName}`, 14, 18);
+      doc.setFontSize(10);
+      doc.setTextColor(120);
+      doc.text(`Період: ${from} — ${to}`, 14, 26);
+      doc.text(`Сформовано: ${new Date().toLocaleString("uk-UA")}`, 14, 32);
+      doc.setTextColor(0);
+
+      doc.setFontSize(12);
+      doc.text("Метрики CPU / RAM", 14, 44);
+
+      const tableRows = history.slice(0, 500).map((p: HistoryPoint) => [
+        new Date(p.time.endsWith("Z") ? p.time : p.time + "Z").toLocaleString("uk-UA"),
+        p.cpu != null ? `${p.cpu}%` : "—",
+        p.ram != null ? `${p.ram}%` : "—",
+      ]);
+
+      autoTable(doc, {
+        startY: 48,
+        head: [["Час", "CPU", "RAM"]],
+        body: tableRows.length ? tableRows : [["Немає даних", "", ""]],
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [30, 64, 175] },
+      });
+
+      const afterTable = (doc as any).lastAutoTable?.finalY ?? 60;
+
+      doc.setFontSize(12);
+      doc.text("Останні алерти", 14, afterTable + 12);
+
+      const alertRows = recentAlerts.slice(0, 30).map((a) => [
+        fmtDateTime(a.sent_at),
+        a.severity,
+        a.message,
+      ]);
+
+      autoTable(doc, {
+        startY: afterTable + 16,
+        head: [["Час", "Рівень", "Повідомлення"]],
+        body: alertRows.length ? alertRows : [["Алертів немає", "", ""]],
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [30, 64, 175] },
+        columnStyles: { 2: { cellWidth: "auto" } },
+      });
+
+      doc.save(`${serverName}_${from}_${to}.pdf`);
+    } catch (e) {
+      console.error("PDF export error:", e);
+      alert("Помилка при генерації PDF");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center gap-2">
+        <Download className="w-4 h-4 text-accent" />
+        <span className="font-semibold">Експорт PDF</span>
+      </CardHeader>
+      <CardBody>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-xs text-muted">
+            Від
+            <input
+              type="date"
+              value={from}
+              max={to}
+              onChange={(e) => setFrom(e.target.value)}
+              className="bg-panel2 border border-border rounded px-2 py-1 text-text text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted">
+            До
+            <input
+              type="date"
+              value={to}
+              min={from}
+              max={today()}
+              onChange={(e) => setTo(e.target.value)}
+              className="bg-panel2 border border-border rounded px-2 py-1 text-text text-sm"
+            />
+          </label>
+          <button
+            onClick={handleExport}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-bg text-sm font-medium rounded hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {loading ? "Генерація…" : "Завантажити PDF"}
+          </button>
+        </div>
+      </CardBody>
+    </Card>
+  );
 }
 
 // ── main page ─────────────────────────────────────────────────────────────────
@@ -98,7 +344,6 @@ export function ServerDetail() {
 
   const m = data.metrics ?? {};
 
-  // Metrics shortcuts
   const cpu: number | null = m.cpu?.percent ?? null;
   const ram: number | null = m.ram?.percent ?? null;
   const ramFreeGb: number | null = m.ram?.free_gb ?? null;
@@ -109,7 +354,6 @@ export function ServerDetail() {
   const backupIssues: string[] = backup.issues ?? [];
   const activeSessions: any[] = m.active_sessions ?? [];
 
-  // Security
   const bruteForce: any[] = m.brute_force_alerts ?? [];
   const newIps: any[] = m.new_ip_alerts ?? [];
   const newAdmins: any[] = m.new_admins ?? [];
@@ -125,7 +369,6 @@ export function ServerDetail() {
   const recentAlerts = data.recent_alerts.slice(0, 10);
   const recentCommands = data.recent_commands.slice(0, 10);
 
-  // Backup tone
   const backupTone =
     backup.status === "critical" ? "crit" : backup.status === "warning" ? "warn" : "ok";
 
@@ -152,6 +395,13 @@ export function ServerDetail() {
             </Badge>
           ) : (
             <Badge tone="crit">offline</Badge>
+          )}
+
+          {data.agent_version && (
+            <Badge tone={data.agent_outdated ? "warn" : "muted"}>
+              {data.agent_outdated ? "⬆️ " : ""}v{data.agent_version}
+              {data.agent_outdated ? ` → ${data.latest_agent_version}` : ""}
+            </Badge>
           )}
 
           <span className="ml-auto flex items-center gap-1 text-xs text-muted">
@@ -193,7 +443,10 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 2: Диски ─────────────────────────────────────────────── */}
+        {/* ── Section 2: Графіки CPU / RAM ─────────────────────────────────── */}
+        <MetricsChart serverId={data.id} />
+
+        {/* ── Section 3: Диски ─────────────────────────────────────────────── */}
         {disks.length > 0 && (
           <Card>
             <CardHeader className="flex items-center gap-2">
@@ -234,7 +487,7 @@ export function ServerDetail() {
           </Card>
         )}
 
-        {/* ── Section 3: Сервіси ───────────────────────────────────────────── */}
+        {/* ── Section 4: Сервіси ───────────────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-accent" />
@@ -268,7 +521,7 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 4: Бекапи ───────────────────────────────────────────── */}
+        {/* ── Section 5: Бекапи ───────────────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Database className="w-4 h-4 text-accent" />
@@ -318,7 +571,7 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 5: Безпека ───────────────────────────────────────────── */}
+        {/* ── Section 6: Безпека ───────────────────────────────────────────── */}
         {hasSecurityData && (
           <Card>
             <CardHeader className="flex items-center gap-2">
@@ -397,7 +650,7 @@ export function ServerDetail() {
           </Card>
         )}
 
-        {/* ── Section 6: RDP Сесії ─────────────────────────────────────────── */}
+        {/* ── Section 7: RDP Сесії ─────────────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-accent" />
@@ -435,7 +688,7 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 7: Останні алерти ────────────────────────────────────── */}
+        {/* ── Section 8: Останні алерти ────────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-warn" />
@@ -473,7 +726,7 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 8: Журнал команд ─────────────────────────────────────── */}
+        {/* ── Section 9: Журнал команд ─────────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-accent" />
@@ -518,6 +771,13 @@ export function ServerDetail() {
             )}
           </CardBody>
         </Card>
+
+        {/* ── Section 10: Експорт PDF ──────────────────────────────────────── */}
+        <ExportSection
+          serverId={data.id}
+          serverName={data.name}
+          recentAlerts={data.recent_alerts}
+        />
       </main>
     </div>
   );

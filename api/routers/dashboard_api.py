@@ -2,16 +2,20 @@
 JSON API для React-дашборду. Усе під require_admin (cookie-сесія).
 """
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from database import get_db
-from models import Server, MetricsSnapshot, Alert, Command, PendingAlert
+from models import Server, MetricsSnapshot, Alert, Command, PendingAlert, Metric
 import security
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
                    dependencies=[Depends(security.require_admin)])
+
+LATEST_AGENT_VERSION = "1.2.0"
 
 ONLINE_THRESHOLD = timedelta(minutes=5)
 
@@ -61,6 +65,10 @@ def overview(db: Session = Depends(get_db)):
                 "size_mb": data.get("latest_size_mb"),
             },
             "reboot_required": data.get("reboot_required", False),
+            "agent_version": s.agent_version,
+            "agent_outdated": bool(
+                s.agent_version and s.agent_version != LATEST_AGENT_VERSION
+            ),
         })
     return result
 
@@ -95,6 +103,9 @@ def server_detail(server_id: str, db: Session = Depends(get_db)):
         "online": _is_online(s.last_seen),
         "last_seen": s.last_seen.isoformat() if s.last_seen else None,
         "maintenance_until": s.maintenance_until.isoformat() if s.maintenance_until else None,
+        "agent_version": s.agent_version,
+        "agent_outdated": bool(s.agent_version and s.agent_version != LATEST_AGENT_VERSION),
+        "latest_agent_version": LATEST_AGENT_VERSION,
         "metrics": snap.data if snap else {},
         "recent_alerts": [
             {
@@ -153,6 +164,58 @@ def recent_alerts(limit: int = 50, db: Session = Depends(get_db)):
             for p in pending
         ],
     }
+
+
+@router.get("/servers/{server_id}/history")
+def server_history(
+    server_id: str,
+    hours: int = Query(default=1, ge=1, le=168),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Повертає часовий ряд CPU і RAM для графіків та PDF-експорту."""
+    if start and end:
+        cutoff = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+    else:
+        end_dt = datetime.utcnow()
+        cutoff = end_dt - timedelta(hours=hours)
+
+    rows = (
+        db.query(Metric)
+        .filter(
+            Metric.server_id == server_id,
+            Metric.metric_name.in_(["cpu_percent", "ram_percent"]),
+            Metric.recorded_at >= cutoff,
+            Metric.recorded_at <= end_dt,
+        )
+        .order_by(Metric.recorded_at)
+        .all()
+    )
+
+    by_time: dict = {}
+    for r in rows:
+        t = r.recorded_at.isoformat()
+        if t not in by_time:
+            by_time[t] = {"time": t}
+        key = "cpu" if r.metric_name == "cpu_percent" else "ram"
+        by_time[t][key] = round(r.value, 1)
+
+    return sorted(by_time.values(), key=lambda x: x["time"])
+
+
+class AckPayload(BaseModel):
+    alert_key: str
+    hours: int = 6
+
+
+@router.post("/servers/{server_id}/alerts/ack")
+def ack_alert(server_id: str, body: AckPayload, db: Session = Depends(get_db)):
+    """Заглушує алерт на вказану кількість годин."""
+    import storage_helpers as sh
+    sh.ack_alert(db, server_id, body.alert_key, body.hours)
+    return {"ok": True}
 
 
 @router.get("/commands")

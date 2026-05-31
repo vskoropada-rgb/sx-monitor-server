@@ -179,9 +179,14 @@ def _build_keyboard(decision: dict, config: dict, metrics: dict = None) -> dict:
 
     buttons = [row1]
     if row2:
-        # по 2 кнопки в рядок
         for i in range(0, len(row2), 2):
             buttons.append(row2[i:i+2])
+
+    alert_key = decision.get("alert_key", "generic")
+    buttons.append([
+        {"text": "✅ Зрозуміло (6г)", "callback_data": f"ack|{server_id}|6|{alert_key}"},
+        {"text": "✅ Зрозуміло (24г)", "callback_data": f"ack|{server_id}|24|{alert_key}"},
+    ])
 
     return {"inline_keyboard": buttons}
 

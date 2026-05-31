@@ -22,15 +22,13 @@ def init_db():
     from models import Base as ModelsBase  # noqa: F401 — registers all models
     ModelsBase.metadata.create_all(bind=engine)
     # Auto-migrate: add columns that may be missing in existing deployments
+    from sqlalchemy import text
     with engine.connect() as conn:
-        conn.execute(
-            __import__("sqlalchemy").text(
-                "ALTER TABLE commands ADD COLUMN IF NOT EXISTS tg_topic_id VARCHAR;"
-            )
-        )
-        conn.execute(
-            __import__("sqlalchemy").text(
-                "ALTER TABLE servers ADD COLUMN IF NOT EXISTS maintenance_until TIMESTAMP;"
-            )
-        )
+        for stmt in [
+            "ALTER TABLE commands ADD COLUMN IF NOT EXISTS tg_topic_id VARCHAR;",
+            "ALTER TABLE servers  ADD COLUMN IF NOT EXISTS maintenance_until TIMESTAMP;",
+            "ALTER TABLE servers  ADD COLUMN IF NOT EXISTS agent_version VARCHAR;",
+            "ALTER TABLE alerts   ADD COLUMN IF NOT EXISTS acked_until TIMESTAMP;",
+        ]:
+            conn.execute(text(stmt))
         conn.commit()

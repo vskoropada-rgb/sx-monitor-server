@@ -82,6 +82,13 @@ export function ServerCard({ s }: { s: ServerOverview }) {
             <AlertTriangle className="w-3.5 h-3.5" /> Очікує перезавантаження
           </div>
         )}
+
+        {s.agent_version && (
+          <div className={cn("text-xs", s.agent_outdated ? "text-warn" : "text-muted")}>
+            {s.agent_outdated ? "⬆️ " : ""}Агент {s.agent_version}
+            {s.agent_outdated ? " (застарів)" : ""}
+          </div>
+        )}
       </CardBody>
     </Card>
     </Link>

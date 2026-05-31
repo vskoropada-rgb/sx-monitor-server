@@ -22,8 +22,10 @@ def receive_metrics(
 ):
     now = datetime.utcnow()
 
-    # Оновлюємо last_seen
+    # Оновлюємо last_seen і версію агента
     server.last_seen = now
+    if payload.get("agent_version"):
+        server.agent_version = payload["agent_version"]
     db.add(server)
 
     # Зберігаємо числові метрики для Grafana
