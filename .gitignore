@@ -4,3 +4,4 @@ __pycache__/
 .backup_*/
 *.log
 grafana/dashboards/*.json.bak
+.claude/
