@@ -757,18 +757,12 @@ function Setup-Company-Details {
     if ($name) { Set-EnvValue "COMPANY_NAME" $name }
     if ($sid)  { Set-EnvValue "SERVER_ID"    $sid  }
 
-    # Автоматично створити топік в Telegram
+    # Telegram-тему створює центральний сервер при реєстрації (пункт R),
+    # бо токен бота лише на сервері. Можна вказати існуючий топік вручну.
     Write-Host ""
-    $displayName = if ($name) { $name } else { (Get-DisplayValue "COMPANY_NAME" $env) }
-    $topicId = New-TelegramTopic $displayName
-
-    if ($topicId) {
-        Set-EnvValue "TG_TOPIC_ID" $topicId
-    } else {
-        Write-Info "Не вдалося створити топік автоматично."
-        $manual = Read-Host "  Введіть TG_TOPIC_ID вручну (або Enter щоб пропустити)"
-        if ($manual) { Set-EnvValue "TG_TOPIC_ID" $manual }
-    }
+    Write-Info "Telegram-тема створиться автоматично сервером при реєстрації (R)."
+    $manual = Read-Host "  Або введіть існуючий TG_TOPIC_ID вручну (Enter = авто)"
+    if ($manual) { Set-EnvValue "TG_TOPIC_ID" $manual }
 }
 
 function Setup-Paths {

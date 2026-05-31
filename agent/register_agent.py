@@ -111,13 +111,20 @@ def main():
         print(f"Помилка реєстрації: {r.status_code} {r.text}")
         sys.exit(1)
 
-    print(f"OK: {r.json()}")
+    resp = r.json()
+    print(f"OK: {resp}")
 
     if not existing:
         _update_env_key("API_KEY", _encrypt_dpapi(api_key))
         print("API_KEY збережено в .env (зашифровано).")
     else:
         print("API_KEY уже був у .env — лишаю без змін.")
+
+    # Сервер міг сам створити Telegram-тему — зберігаємо її ID у .env
+    srv_topic = resp.get("tg_topic_id")
+    if srv_topic and str(srv_topic) != str(topic_id or ""):
+        _update_env_key("TG_TOPIC_ID", str(srv_topic))
+        print(f"Telegram-тему створено сервером: TG_TOPIC_ID={srv_topic}")
 
     print("\nГотово. Запускайте агента:  python agent.py")
 
