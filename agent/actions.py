@@ -352,4 +352,8 @@ def update_agent(branch: str = "main") -> Tuple[bool, str]:
         [sys.executable, agent_path],
         creationflags=getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0),
     )
-    sys.exit(0)
+    # Повертаємо результат до того як вмерти — report_result встигне відправити статус
+    import threading as _th
+    _th.Thread(target=lambda: (__import__("time").sleep(5), os._exit(0)),
+               daemon=True).start()
+    return True, f"Оновлено {len(updated)} файлів. Перезапуск через 5с…"
