@@ -139,10 +139,19 @@ def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict)
         icon = "✅" if svc["is_running"] else "❌"
         lines.append(f"{icon} {svc['name']}")
 
-    keyboard = {"inline_keyboard": [[
-        {"text": "🔄 Оновити", "callback_data": f"status_{server.id}"},
-        {"text": "👥 Сесії",   "callback_data": f"sessions_{server.id}"},
-    ]]}
+    keyboard = {"inline_keyboard": [
+        [
+            {"text": "🔄 Оновити",  "callback_data": f"status_{server.id}"},
+            {"text": "👥 Сесії",    "callback_data": f"sessions_{server.id}"},
+        ],
+        [
+            {"text": "💾 Диски",    "callback_data": f"disk_{server.id}"},
+            {"text": "🔁 Сервіси",  "callback_data": f"restart_service_{server.id}"},
+        ],
+        [
+            {"text": "🔴 Ребут",    "callback_data": f"reboot_{server.id}"},
+        ],
+    ]}
     _send(chat_id, "\n".join(lines), topic_id, keyboard, message_id)
 
 
