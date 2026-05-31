@@ -14,6 +14,7 @@ class Server(Base):
     name       = Column(String, nullable=False)      # COMPANY_NAME
     api_key    = Column(String, nullable=False, unique=True)
     tg_topic_id = Column(String)                    # Telegram Forum Topic
+    maintenance_until = Column(DateTime, nullable=True)
     last_seen  = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 

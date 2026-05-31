@@ -93,6 +93,9 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
         if not server:
             return
 
+        if server.maintenance_until and server.maintenance_until > datetime.utcnow():
+            return  # in maintenance mode, skip alerts
+
         from config import settings
         config = {
             "SERVER_ID":              server.id,

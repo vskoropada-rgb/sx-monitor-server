@@ -94,6 +94,13 @@ def collect_metrics(config: dict) -> dict:
         except Exception as e:
             logger.error("collector %s: %s", mod_name, e)
 
+    # Додаємо список заблокованих IP до метрик
+    try:
+        blocked = actions.list_blocked_ips()
+        metrics["blocked_ips"] = blocked
+    except Exception:
+        metrics["blocked_ips"] = []
+
     # Не шлемо алерти по вже заблокованих в firewall IP
     if metrics.get("brute_force_alerts"):
         try:
@@ -185,6 +192,12 @@ def execute_command(config: dict, cmd: dict) -> tuple[str, str]:
         elif action == "reboot":
             delay = int(params.get("delay_sec", 30))
             ok, msg = actions.reboot_server(delay)
+
+        elif action == "unblock_ip":
+            ip = params.get("ip")
+            if not ip:
+                return "failed", "не вказано ip"
+            ok, msg = actions.unblock_ip(ip)
 
         else:
             return "failed", f"невідома команда: {action}"

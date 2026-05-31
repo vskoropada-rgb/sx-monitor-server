@@ -2,12 +2,18 @@
 Telegram бот — централізований для всіх серверів.
 Адаптація bot.py з SX_Monitoring під multi-server PostgreSQL.
 """
+import io
 import logging
 import time
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 from config import settings
 from database import SessionLocal, init_db
@@ -50,6 +56,105 @@ def _send(chat_id: str, text: str, topic_id: str = None,
         return result
 
     return _api("sendMessage", payload)
+
+
+def _send_photo(chat_id: str, topic_id: str, photo_bytes: bytes, caption: str = ""):
+    payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+    if topic_id:
+        payload["message_thread_id"] = int(topic_id)
+    try:
+        r = requests.post(
+            f"{BASE_URL}/sendPhoto",
+            data=payload,
+            files={"photo": ("chart.png", photo_bytes, "image/png")},
+            timeout=30,
+        )
+        return r.json()
+    except Exception as e:
+        logger.error("sendPhoto error: %s", e)
+        return {"ok": False}
+
+
+def _generate_cpu_ram_chart(server_id: str, hours: int) -> bytes | None:
+    db: Session = SessionLocal()
+    try:
+        from models import Metric
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        rows = db.query(Metric).filter(
+            Metric.server_id == server_id,
+            Metric.metric_name.in_(["cpu_percent", "ram_percent"]),
+            Metric.recorded_at >= cutoff,
+        ).order_by(Metric.recorded_at).all()
+    finally:
+        db.close()
+
+    if not rows:
+        return None
+
+    cpu_times, cpu_vals = [], []
+    ram_times, ram_vals = [], []
+    for r in rows:
+        if r.metric_name == "cpu_percent":
+            cpu_times.append(r.recorded_at)
+            cpu_vals.append(r.value)
+        else:
+            ram_times.append(r.recorded_at)
+            ram_vals.append(r.value)
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    if cpu_times:
+        ax.plot(cpu_times, cpu_vals, color='cyan', linewidth=1.5, label='CPU %')
+    if ram_times:
+        ax.plot(ram_times, ram_vals, color='orange', linewidth=1.5, label='RAM %')
+    ax.set_ylim(0, 100)
+    ax.set_ylabel('%', color='white')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    fig.autofmt_xdate()
+    ax.legend(facecolor='#1a1a2e', edgecolor='gray')
+    ax.set_title(f'CPU & RAM — {hours}г', color='white')
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, facecolor='#0d1117')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
+def _generate_backup_trend_chart(server_id: str) -> bytes | None:
+    db: Session = SessionLocal()
+    try:
+        from models import Metric
+        cutoff = datetime.utcnow() - timedelta(days=30)
+        rows = db.query(Metric).filter(
+            Metric.server_id == server_id,
+            Metric.metric_name == "backup_size_mb",
+            Metric.recorded_at >= cutoff,
+        ).order_by(Metric.recorded_at).all()
+    finally:
+        db.close()
+
+    if not rows:
+        return None
+
+    times = [r.recorded_at for r in rows]
+    vals  = [r.value for r in rows]
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.bar(times, vals, color='steelblue', width=0.02)
+    ax.set_ylabel('MB', color='white')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m'))
+    fig.autofmt_xdate()
+    ax.set_title('Тренд бекапів (30 днів)', color='white')
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, facecolor='#0d1117')
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
 
 
 def _get_server_by_callback(data: str) -> tuple[Server | None, str]:
@@ -118,17 +223,78 @@ def handle_callback(update: dict):
         ip = data[len("block_confirm_"):-(len(server.id) + 1)]
         _queue_command(chat_id, topic_id, message_id, server,
                        "block_ip", {"ip": ip})
+    elif action == "backup":
+        _handle_backup(chat_id, topic_id, message_id, server, metrics)
+    elif action.startswith("backup_trend"):
+        chart = _generate_backup_trend_chart(server.id)
+        if chart:
+            _send_photo(chat_id, topic_id, chart, f"📈 Тренд бекапів — {server.name}")
+        else:
+            _send(chat_id, "📈 Даних ще немає", topic_id, message_id=message_id)
+    elif action.startswith("chart_1h"):
+        chart = _generate_cpu_ram_chart(server.id, 1)
+        if chart:
+            _send_photo(chat_id, topic_id, chart, f"📊 CPU & RAM 1г — {server.name}")
+        else:
+            _send(chat_id, "📊 Даних ще немає", topic_id, message_id=message_id)
+    elif action.startswith("chart_24h"):
+        chart = _generate_cpu_ram_chart(server.id, 24)
+        if chart:
+            _send_photo(chat_id, topic_id, chart, f"📊 CPU & RAM 24г — {server.name}")
+        else:
+            _send(chat_id, "📊 Даних ще немає", topic_id, message_id=message_id)
+    elif action.startswith("disk_chart"):
+        chart = _generate_cpu_ram_chart(server.id, 24)
+        if chart:
+            _send_photo(chat_id, topic_id, chart, f"💾 Графік 24г — {server.name}")
+        else:
+            _send(chat_id, "📊 Даних ще немає", topic_id, message_id=message_id)
+    elif action == "blocked_ips":
+        _handle_blocked_ips(chat_id, topic_id, message_id, server, metrics)
+    elif action == "maintenance":
+        db: Session = SessionLocal()
+        try:
+            srv = db.query(Server).filter(Server.id == server.id).first()
+            until = datetime.utcnow() + timedelta(hours=2)
+            srv.maintenance_until = until
+            db.commit()
+        finally:
+            db.close()
+        _send(chat_id,
+              f"🔧 <b>{server.name}</b> переведено в режим обслуговування на 2 години.\n"
+              f"Алерти призупинено до {(datetime.now() + timedelta(hours=2)).strftime('%H:%M')}",
+              topic_id,
+              {"inline_keyboard": [[
+                  {"text": "✅ Зняти обслуговування", "callback_data": f"maintenance_off_{server.id}"}
+              ]]},
+              message_id)
+    elif action == "maintenance_off":
+        db: Session = SessionLocal()
+        try:
+            srv = db.query(Server).filter(Server.id == server.id).first()
+            srv.maintenance_until = None
+            db.commit()
+        finally:
+            db.close()
+        _send(chat_id, f"✅ Режим обслуговування знято для {server.name}", topic_id, message_id=message_id)
+    elif action.startswith("unblock_"):
+        ip = data[len("unblock_"):-(len(server.id) + 1)]
+        keyboard = {"inline_keyboard": [[
+            {"text": "✅ Так, розблокувати", "callback_data": f"unblock_confirm_{ip}_{server.id}"},
+            {"text": "❌ Скасувати",          "callback_data": f"status_{server.id}"},
+        ]]}
+        _send(chat_id, f"🔓 Розблокувати IP <b>{ip}</b>?", topic_id, keyboard, message_id)
+    elif action.startswith("unblock_confirm_"):
+        ip = data[len("unblock_confirm_"):-(len(server.id) + 1)]
+        _queue_command(chat_id, topic_id, message_id, server, "unblock_ip", {"ip": ip})
     elif action == "reboot":
-        keyboard = {"inline_keyboard": [
-            [
-                {"text": "✅ Так, ребут",
-                 "callback_data": f"reboot_confirm_{server.id}"},
-                {"text": "❌ Скасувати",
-                 "callback_data": f"reboot_cancel_{server.id}"},
-            ],
-        ]}
-        _send(chat_id, f"⚠️ Перезавантажити {server.name}?",
-              topic_id, keyboard, message_id)
+        sessions = metrics.get("active_sessions", [])
+        warn = f"\n⚠️ Активних сесій: {len(sessions)}" if sessions else ""
+        keyboard = {"inline_keyboard": [[
+            {"text": "✅ Так, ребут", "callback_data": f"reboot_confirm_{server.id}"},
+            {"text": "❌ Скасувати",  "callback_data": f"reboot_cancel_{server.id}"},
+        ]]}
+        _send(chat_id, f"⚠️ Перезавантажити {server.name}?{warn}", topic_id, keyboard, message_id)
     elif action == "reboot_confirm":
         _queue_command(chat_id, topic_id, message_id, server, "reboot", {})
     elif action == "reboot_cancel":
@@ -158,15 +324,23 @@ def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict)
 
     keyboard = {"inline_keyboard": [
         [
-            {"text": "🔄 Оновити",  "callback_data": f"status_{server.id}"},
-            {"text": "👥 Сесії",    "callback_data": f"sessions_{server.id}"},
+            {"text": "🔄 Оновити",    "callback_data": f"status_{server.id}"},
+            {"text": "👥 Сесії",      "callback_data": f"sessions_{server.id}"},
         ],
         [
-            {"text": "💾 Диски",    "callback_data": f"disk_{server.id}"},
-            {"text": "🔁 Сервіси",  "callback_data": f"restart_service_{server.id}"},
+            {"text": "💾 Диски",      "callback_data": f"disk_{server.id}"},
+            {"text": "📦 Бекапи",     "callback_data": f"backup_{server.id}"},
         ],
         [
-            {"text": "🔴 Ребут",    "callback_data": f"reboot_{server.id}"},
+            {"text": "📊 Графік 1г",  "callback_data": f"chart_1h_{server.id}"},
+            {"text": "📊 Графік 24г", "callback_data": f"chart_24h_{server.id}"},
+        ],
+        [
+            {"text": "🔒 Заблоковані IP", "callback_data": f"blocked_ips_{server.id}"},
+            {"text": "🔧 Обслуговування", "callback_data": f"maintenance_{server.id}"},
+        ],
+        [
+            {"text": "🔴 Ребут",      "callback_data": f"reboot_{server.id}"},
         ],
     ]}
     _send(chat_id, "\n".join(lines), topic_id, keyboard, message_id)
@@ -186,6 +360,7 @@ def _handle_sessions(chat_id, topic_id, message_id, server: Server, metrics: dic
     btns = [[{"text": f"🚫 Kick {s.get('username','?')}",
               "callback_data": f"kill_confirm_{s.get('id', '0')}_{server.id}"}]
             for s in sessions[:5]]
+    btns.append([{"text": "🚫 Завершити всіх", "callback_data": f"kill_confirm_all_{server.id}"}])
     _send(chat_id, "\n".join(lines), topic_id, {"inline_keyboard": btns}, message_id)
 
 
@@ -195,7 +370,42 @@ def _handle_disk(chat_id, topic_id, message_id, server: Server, metrics: dict):
         delta = f" ↓{abs(d['delta_1h']):.1f}%/г" if d.get("delta_1h", 0) < 0 else ""
         lines.append(f"{d['path']}: {d.get('free_pct')}% вільно "
                      f"({d.get('free_gb')} / {d.get('total_gb')} GB){delta}")
-    _send(chat_id, "\n".join(lines), topic_id, message_id=message_id)
+    keyboard = {"inline_keyboard": [[
+        {"text": "📊 Графік диску 24г", "callback_data": f"disk_chart_{server.id}"},
+        {"text": "◀️ Назад", "callback_data": f"status_{server.id}"},
+    ]]}
+    _send(chat_id, "\n".join(lines), topic_id, keyboard, message_id)
+
+
+def _handle_backup(chat_id, topic_id, message_id, server: Server, metrics: dict):
+    status = metrics.get("status", "?")
+    icon = "✅" if status == "ok" else "⚠️" if status == "warning" else "🔴"
+    lines = [f"📦 <b>Бекапи — {server.name}</b>", ""]
+    lines.append(f"{icon} Статус: <b>{status}</b>")
+    if metrics.get("latest_file"):
+        lines.append(f"📄 {metrics['latest_file']}")
+        lines.append(f"📅 {metrics.get('latest_time','?')}  ({metrics.get('latest_age_hours','?')}г тому)")
+        lines.append(f"📦 {metrics.get('latest_size_mb','?')} MB")
+    for issue in metrics.get("issues", []):
+        lines.append(f"⚠️ {issue}")
+    keyboard = {"inline_keyboard": [[
+        {"text": "📈 Тренд 30д", "callback_data": f"backup_trend_{server.id}"},
+        {"text": "📊 Статус", "callback_data": f"status_{server.id}"},
+    ]]}
+    _send(chat_id, "\n".join(lines), topic_id, keyboard, message_id)
+
+
+def _handle_blocked_ips(chat_id, topic_id, message_id, server: Server, metrics: dict):
+    blocked = metrics.get("blocked_ips", [])
+    if not blocked:
+        _send(chat_id, "🔒 Заблокованих IP немає", topic_id, message_id=message_id)
+        return
+    lines = [f"🔒 <b>Заблоковані IP — {server.name}</b>", ""]
+    for ip in blocked[:10]:
+        lines.append(f"• {ip}")
+    btns = [[{"text": f"🔓 {ip}", "callback_data": f"unblock_{ip}_{server.id}"}]
+            for ip in blocked[:8]]
+    _send(chat_id, "\n".join(lines), topic_id, {"inline_keyboard": btns}, message_id)
 
 
 def _handle_kill_menu(chat_id, topic_id, message_id, server: Server, metrics: dict):

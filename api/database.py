@@ -28,4 +28,9 @@ def init_db():
                 "ALTER TABLE commands ADD COLUMN IF NOT EXISTS tg_topic_id VARCHAR;"
             )
         )
+        conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE servers ADD COLUMN IF NOT EXISTS maintenance_until TIMESTAMP;"
+            )
+        )
         conn.commit()
