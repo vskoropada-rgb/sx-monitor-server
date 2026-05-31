@@ -95,6 +95,15 @@ export interface ServerDetail {
   }>;
 }
 
+export interface LoginLogEntry {
+  id: number;
+  admin_id: number;
+  action: "login" | "logout";
+  ip: string | null;
+  user_agent: string | null;
+  at: string | null;
+}
+
 export const api = {
   me: () => req<{ admin_id: number; authenticated: boolean }>("/api/auth/me"),
   overview: () => req<ServerOverview[]>("/api/dashboard/overview"),
@@ -108,6 +117,7 @@ export const api = {
     req<HistoryPoint[]>(
       `/api/dashboard/servers/${id}/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
     ),
+  authLogs: () => req<LoginLogEntry[]>("/api/dashboard/auth-logs"),
   logout: () =>
     fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }),
 };

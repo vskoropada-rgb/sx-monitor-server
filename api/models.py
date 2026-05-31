@@ -108,6 +108,18 @@ class KnownEntity(Base):
     last_seen   = Column(DateTime, default=datetime.utcnow)
 
 
+class LoginLog(Base):
+    """Журнал входів і виходів адміністраторів."""
+    __tablename__ = "login_logs"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    admin_id   = Column(Integer, nullable=False)
+    action     = Column(String, nullable=False)   # login | logout
+    ip         = Column(String)
+    user_agent = Column(Text)
+    at         = Column(DateTime, default=datetime.utcnow)
+
+
 class AuthToken(Base):
     """Одноразовий magic-link токен для входу в дашборд через Telegram."""
     __tablename__ = "auth_tokens"

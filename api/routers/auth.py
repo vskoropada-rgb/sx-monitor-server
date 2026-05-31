@@ -6,24 +6,39 @@
   POST /api/auth/logout       — вихід
   POST /api/auth/login-token  — внутрішній: бот просить одноразовий токен (захищено shared-secret)
 """
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db
+from models import LoginLog
 import security
 
 router = APIRouter(tags=["auth"])
 
 
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @router.get("/auth")
-def magic_link(token: str, db: Session = Depends(get_db)):
+def magic_link(token: str, request: Request, db: Session = Depends(get_db)):
     """Перехід за посиланням з Telegram. Спалює токен, видає сесію."""
     admin_id = security.consume_login_token(db, token)
-    jwt_token = security.create_session_jwt(admin_id)
+    db.add(LoginLog(
+        admin_id=admin_id,
+        action="login",
+        ip=_client_ip(request),
+        user_agent=request.headers.get("User-Agent", ""),
+    ))
+    db.commit()
 
+    jwt_token = security.create_session_jwt(admin_id)
     resp = RedirectResponse(url="/", status_code=303)
     security.set_session_cookie(resp, jwt_token)
     return resp
@@ -35,7 +50,19 @@ def me(admin_id: int = Depends(security.require_admin)):
 
 
 @router.post("/api/auth/logout")
-def logout(response: Response):
+def logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    admin_id: int = Depends(security.require_admin),
+):
+    db.add(LoginLog(
+        admin_id=admin_id,
+        action="logout",
+        ip=_client_ip(request),
+        user_agent=request.headers.get("User-Agent", ""),
+    ))
+    db.commit()
     security.clear_session_cookie(response)
     return {"ok": True}
 

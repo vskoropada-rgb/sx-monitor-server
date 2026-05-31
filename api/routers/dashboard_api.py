@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from database import get_db
-from models import Server, MetricsSnapshot, Alert, Command, PendingAlert, Metric
+from models import Server, MetricsSnapshot, Alert, Command, PendingAlert, Metric, LoginLog
 import security
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
@@ -238,4 +238,25 @@ def command_log(limit: int = 50, db: Session = Depends(get_db)):
             "executed_at": c.executed_at.isoformat() if c.executed_at else None,
         }
         for c in cmds
+    ]
+
+
+@router.get("/auth-logs")
+def auth_logs(limit: int = 100, db: Session = Depends(get_db)):
+    rows = (
+        db.query(LoginLog)
+        .order_by(LoginLog.at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "admin_id": r.admin_id,
+            "action": r.action,
+            "ip": r.ip,
+            "user_agent": r.user_agent,
+            "at": r.at.isoformat() if r.at else None,
+        }
+        for r in rows
     ]

@@ -29,6 +29,14 @@ def init_db():
             "ALTER TABLE servers  ADD COLUMN IF NOT EXISTS maintenance_until TIMESTAMP;",
             "ALTER TABLE servers  ADD COLUMN IF NOT EXISTS agent_version VARCHAR;",
             "ALTER TABLE alerts   ADD COLUMN IF NOT EXISTS acked_until TIMESTAMP;",
+            """CREATE TABLE IF NOT EXISTS login_logs (
+                id SERIAL PRIMARY KEY,
+                admin_id INTEGER NOT NULL,
+                action VARCHAR NOT NULL,
+                ip VARCHAR,
+                user_agent TEXT,
+                at TIMESTAMP DEFAULT NOW()
+            );""",
         ]:
             conn.execute(text(stmt))
         conn.commit()
