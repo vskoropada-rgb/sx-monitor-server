@@ -202,9 +202,34 @@ def _queue_command(chat_id, topic_id, message_id, server: Server,
 
 
 def handle_message(update: dict):
-    """Текстові команди боту. Поки що — лише /login для дашборду."""
-    msg  = update.get("message", {})
-    text = (msg.get("text") or "").strip()
+    msg      = update.get("message", {})
+    text     = (msg.get("text") or "").strip()
+    chat_id  = str(msg.get("chat", {}).get("id", ""))
+    topic_id = str(msg.get("message_thread_id", "")) or None
+
+    if text.startswith("/status"):
+        db: Session = SessionLocal()
+        try:
+            if topic_id:
+                server = db.query(Server).filter(Server.tg_topic_id == topic_id).first()
+            else:
+                servers = db.query(Server).all()
+                server = servers[0] if len(servers) == 1 else None
+
+            if not server:
+                _send(chat_id, "❌ Сервер не знайдено для цього топіку.", topic_id)
+                return
+
+            snap = db.query(MetricsSnapshot).filter(
+                MetricsSnapshot.server_id == server.id
+            ).first()
+            metrics = snap.data if snap else {}
+        finally:
+            db.close()
+
+        _handle_status(chat_id, topic_id, None, server, metrics)
+        return
+
     if not text.startswith("/login"):
         return
 
