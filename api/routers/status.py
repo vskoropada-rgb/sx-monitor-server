@@ -108,25 +108,22 @@ def register_server(
         raise HTTPException(status_code=403, detail="Invalid register secret")
 
     from models import Server as ServerModel
-    name        = payload.get("name") or payload["server_id"]
-    topic_id    = payload.get("tg_topic_id")
+    name = payload.get("name") or payload["server_id"]
 
     existing = db.query(ServerModel).filter(
         ServerModel.id == payload["server_id"]
     ).first()
 
     if existing:
-        existing.name = payload.get("name", existing.name)
-        # Топік управляється виключно сервером — ігноруємо tg_topic_id від агента
+        existing.name = name
         if not existing.tg_topic_id:
             existing.tg_topic_id = _create_forum_topic(existing.name)
         db.commit()
         _send_registration_message(existing.name, existing.tg_topic_id, "updated")
         return {"ok": True, "action": "updated", "tg_topic_id": existing.tg_topic_id}
 
-    # Нова реєстрація: якщо топік не передано — створюємо автоматично
-    if not topic_id:
-        topic_id = _create_forum_topic(name)
+    # Нова реєстрація — сервер завжди сам створює топік
+    topic_id = _create_forum_topic(name)
 
     server = ServerModel(
         id=payload["server_id"],
