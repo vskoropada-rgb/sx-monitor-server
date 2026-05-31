@@ -66,12 +66,31 @@ export interface CommandEntry {
   executed_at: string | null;
 }
 
+export interface ServerDetail {
+  id: string;
+  name: string;
+  online: boolean;
+  last_seen: string | null;
+  maintenance_until: string | null;
+  metrics: Record<string, any>;
+  recent_alerts: Array<{ severity: string; message: string; sent_at: string | null }>;
+  recent_commands: Array<{
+    action: string;
+    params: any;
+    status: string;
+    result: string | null;
+    created_at: string | null;
+    executed_at: string | null;
+  }>;
+}
+
 export const api = {
   me: () => req<{ admin_id: number; authenticated: boolean }>("/api/auth/me"),
   overview: () => req<ServerOverview[]>("/api/dashboard/overview"),
   alerts: () =>
     req<{ sent: SentAlert[]; pending: PendingAlert[] }>("/api/dashboard/alerts"),
   commands: () => req<CommandEntry[]>("/api/dashboard/commands"),
+  serverDetail: (id: string) => req<ServerDetail>(`/api/dashboard/servers/${id}`),
   logout: () =>
     fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }),
 };

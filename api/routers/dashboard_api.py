@@ -73,12 +73,48 @@ def server_detail(server_id: str, db: Session = Depends(get_db)):
     snap = db.query(MetricsSnapshot).filter(
         MetricsSnapshot.server_id == server_id
     ).first()
+
+    alerts = (
+        db.query(Alert)
+        .filter(Alert.server_id == server_id)
+        .order_by(Alert.sent_at.desc())
+        .limit(20)
+        .all()
+    )
+    commands = (
+        db.query(Command)
+        .filter(Command.server_id == server_id)
+        .order_by(Command.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
     return {
         "id": s.id,
         "name": s.name,
         "online": _is_online(s.last_seen),
         "last_seen": s.last_seen.isoformat() if s.last_seen else None,
+        "maintenance_until": s.maintenance_until.isoformat() if s.maintenance_until else None,
         "metrics": snap.data if snap else {},
+        "recent_alerts": [
+            {
+                "severity": a.severity,
+                "message": a.message,
+                "sent_at": a.sent_at.isoformat() if a.sent_at else None,
+            }
+            for a in alerts
+        ],
+        "recent_commands": [
+            {
+                "action": c.action,
+                "params": c.params,
+                "status": c.status,
+                "result": c.result,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "executed_at": c.executed_at.isoformat() if c.executed_at else None,
+            }
+            for c in commands
+        ],
     }
 
 

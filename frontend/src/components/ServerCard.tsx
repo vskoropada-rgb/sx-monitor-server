@@ -4,13 +4,15 @@ import { UsageBar } from "@/components/ui/Stat";
 import { type ServerOverview } from "@/lib/api";
 import { cn, diskColor, timeAgo } from "@/lib/utils";
 import { HardDrive, Server, Clock, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export function ServerCard({ s }: { s: ServerOverview }) {
   const backupTone =
     s.backup.status === "critical" ? "crit" : s.backup.status === "warning" ? "warn" : "ok";
 
   return (
-    <Card className="flex flex-col">
+    <Link to={`/server/${s.id}`} className="block">
+    <Card className="flex flex-col cursor-pointer hover:border-accent/50 transition-colors">
       <CardHeader className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Server className="w-4 h-4 text-accent" />
@@ -82,5 +84,6 @@ export function ServerCard({ s }: { s: ServerOverview }) {
         )}
       </CardBody>
     </Card>
+    </Link>
   );
 }
