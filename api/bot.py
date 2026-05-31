@@ -103,7 +103,11 @@ def handle_callback(update: dict):
     elif action == "disk":
         _handle_disk(chat_id, topic_id, message_id, server, metrics)
     elif action == "restart_service":
-        _queue_command(chat_id, topic_id, message_id, server, "restart_service", {})
+        _handle_services_menu(chat_id, topic_id, message_id, server, metrics)
+    elif action.startswith("svc_restart_"):
+        svc_name = action[len("svc_restart_"):]
+        _queue_command(chat_id, topic_id, message_id, server,
+                       "restart_service", {"service": svc_name})
     elif action == "kill_session":
         _handle_kill_menu(chat_id, topic_id, message_id, server, metrics)
     elif action.startswith("kill_confirm_"):
@@ -111,11 +115,24 @@ def handle_callback(update: dict):
         _queue_command(chat_id, topic_id, message_id, server,
                        "kick_session", {"session_id": session_id})
     elif action.startswith("block_confirm_"):
-        ip = data.replace(f"block_confirm_", "").replace(f"_{server.id}", "")
+        ip = data[len("block_confirm_"):-(len(server.id) + 1)]
         _queue_command(chat_id, topic_id, message_id, server,
                        "block_ip", {"ip": ip})
     elif action == "reboot":
+        keyboard = {"inline_keyboard": [
+            [
+                {"text": "✅ Так, ребут",
+                 "callback_data": f"reboot_confirm_{server.id}"},
+                {"text": "❌ Скасувати",
+                 "callback_data": f"reboot_cancel_{server.id}"},
+            ],
+        ]}
+        _send(chat_id, f"⚠️ Перезавантажити {server.name}?",
+              topic_id, keyboard, message_id)
+    elif action == "reboot_confirm":
         _queue_command(chat_id, topic_id, message_id, server, "reboot", {})
+    elif action == "reboot_cancel":
+        _send(chat_id, "❌ Ребут скасовано", topic_id, message_id=message_id)
 
 
 def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict):
@@ -194,11 +211,29 @@ def _handle_kill_menu(chat_id, topic_id, message_id, server: Server, metrics: di
           {"inline_keyboard": btns}, message_id)
 
 
+def _handle_services_menu(chat_id, topic_id, message_id, server: Server, metrics: dict):
+    services = metrics.get("services", [])
+    if not services:
+        _send(chat_id, "Немає даних про сервіси", topic_id, message_id=message_id)
+        return
+    # stopped first
+    sorted_svcs = sorted(services, key=lambda s: (1 if s.get("is_running") else 0))
+    btns = []
+    for svc in sorted_svcs:
+        icon = "✅" if svc.get("is_running") else "❌"
+        name = svc.get("name", "?")
+        btns.append([{"text": f"{icon} {name}",
+                      "callback_data": f"svc_restart_{name}_{server.id}"}])
+    _send(chat_id, "Оберіть сервіс для перезапуску:", topic_id,
+          {"inline_keyboard": btns}, message_id)
+
+
 def _queue_command(chat_id, topic_id, message_id, server: Server,
                    action: str, params: dict):
     db: Session = SessionLocal()
     try:
-        create_command(db, server.id, action, params, chat_id, message_id)
+        create_command(db, server.id, action, params, chat_id, message_id,
+                       tg_topic_id=topic_id)
         icons = {"block_ip": "🚫", "kick_session": "👤",
                  "restart_service": "🔄", "reboot": "🔴"}
         icon = icons.get(action, "⏳")

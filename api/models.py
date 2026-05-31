@@ -75,6 +75,7 @@ class Command(Base):
     result        = Column(Text)
     tg_chat_id    = Column(String)
     tg_message_id = Column(Integer)
+    tg_topic_id   = Column(String)
     created_at    = Column(DateTime, default=datetime.utcnow)
     executed_at   = Column(DateTime)
 

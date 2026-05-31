@@ -73,6 +73,7 @@ def create_command(
     params: dict,
     tg_chat_id: str = None,
     tg_message_id: int = None,
+    tg_topic_id: str = None,
 ) -> Command:
     cmd = Command(
         server_id=server_id,
@@ -80,6 +81,7 @@ def create_command(
         params=params,
         tg_chat_id=tg_chat_id,
         tg_message_id=tg_message_id,
+        tg_topic_id=tg_topic_id,
     )
     db.add(cmd)
     db.commit()
@@ -93,9 +95,12 @@ def _notify_result(cmd: Command):
         from config import settings
         icon = "✅" if cmd.status == "done" else "❌"
         text = f"{icon} <b>{cmd.action}</b>\n{cmd.result or ''}"
+        payload = {"chat_id": cmd.tg_chat_id, "text": text, "parse_mode": "HTML"}
+        if cmd.tg_topic_id:
+            payload["message_thread_id"] = int(cmd.tg_topic_id)
         requests.post(
             f"https://api.telegram.org/bot{settings.tg_bot_token}/sendMessage",
-            json={"chat_id": cmd.tg_chat_id, "text": text, "parse_mode": "HTML"},
+            json=payload,
             timeout=5,
         )
     except Exception:
