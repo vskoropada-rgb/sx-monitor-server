@@ -199,6 +199,10 @@ def execute_command(config: dict, cmd: dict) -> tuple[str, str]:
                 return "failed", "не вказано ip"
             ok, msg = actions.unblock_ip(ip)
 
+        elif action == "update_agent":
+            branch = params.get("branch", "main")
+            ok, msg = actions.update_agent(branch)
+
         else:
             return "failed", f"невідома команда: {action}"
 

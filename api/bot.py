@@ -299,6 +299,17 @@ def handle_callback(update: dict):
         _queue_command(chat_id, topic_id, message_id, server, "reboot", {})
     elif action == "reboot_cancel":
         _send(chat_id, "❌ Ребут скасовано", topic_id, message_id=message_id)
+    elif action == "update_agent":
+        keyboard = {"inline_keyboard": [[
+            {"text": "✅ Так, оновити", "callback_data": f"update_agent_confirm_{server.id}"},
+            {"text": "❌ Скасувати",    "callback_data": f"status_{server.id}"},
+        ]]}
+        _send(chat_id,
+              f"⬆️ Оновити агента на <b>{server.name}</b>?\n"
+              f"Агент завантажить нові файли з GitHub і перезапуститься.",
+              topic_id, keyboard, message_id)
+    elif action == "update_agent_confirm":
+        _queue_command(chat_id, topic_id, message_id, server, "update_agent", {})
 
 
 def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict):
@@ -324,23 +335,27 @@ def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict)
 
     keyboard = {"inline_keyboard": [
         [
-            {"text": "🔄 Оновити",    "callback_data": f"status_{server.id}"},
-            {"text": "👥 Сесії",      "callback_data": f"sessions_{server.id}"},
+            {"text": "🔄 Оновити",       "callback_data": f"status_{server.id}"},
+            {"text": "👥 Сесії",         "callback_data": f"sessions_{server.id}"},
         ],
         [
-            {"text": "💾 Диски",      "callback_data": f"disk_{server.id}"},
-            {"text": "📦 Бекапи",     "callback_data": f"backup_{server.id}"},
+            {"text": "💾 Диски",         "callback_data": f"disk_{server.id}"},
+            {"text": "📦 Бекапи",        "callback_data": f"backup_{server.id}"},
         ],
         [
-            {"text": "📊 Графік 1г",  "callback_data": f"chart_1h_{server.id}"},
-            {"text": "📊 Графік 24г", "callback_data": f"chart_24h_{server.id}"},
+            {"text": "📊 Графік 1г",     "callback_data": f"chart_1h_{server.id}"},
+            {"text": "📊 Графік 24г",    "callback_data": f"chart_24h_{server.id}"},
         ],
         [
-            {"text": "🔒 Заблоковані IP", "callback_data": f"blocked_ips_{server.id}"},
-            {"text": "🔧 Обслуговування", "callback_data": f"maintenance_{server.id}"},
+            {"text": "🔁 Сервіси",       "callback_data": f"restart_service_{server.id}"},
+            {"text": "🔒 Заблоковані IP","callback_data": f"blocked_ips_{server.id}"},
         ],
         [
-            {"text": "🔴 Ребут",      "callback_data": f"reboot_{server.id}"},
+            {"text": "🔧 Обслуговування","callback_data": f"maintenance_{server.id}"},
+            {"text": "⬆️ Оновити агента","callback_data": f"update_agent_{server.id}"},
+        ],
+        [
+            {"text": "🔴 Ребут",         "callback_data": f"reboot_{server.id}"},
         ],
     ]}
     _send(chat_id, "\n".join(lines), topic_id, keyboard, message_id)

@@ -307,3 +307,45 @@ def _progress_bar(percent: float, length: int = 10) -> str:
     else:
         char = "🟩"
     return char * filled + "⬜" * empty
+
+
+# ─── Оновлення агента ─────────────────────────────────────────
+
+_AGENT_FILES = [
+    "agent.py", "register_agent.py", "config.py", "storage.py", "actions.py",
+    "manage.ps1", "watchdog.ps1", "requirements.txt",
+    "collectors/__init__.py", "collectors/disk.py", "collectors/memory.py",
+    "collectors/services.py", "collectors/backup.py", "collectors/winupdate.py",
+    "collectors/security.py", "collectors/rdp.py", "collectors/usb.py",
+    "collectors/software.py", "collectors/schtasks.py",
+]
+
+
+def update_agent(branch: str = "main") -> Tuple[bool, str]:
+    """Завантажує нові файли агента з GitHub і виходить — watchdog перезапустить."""
+    import os
+    import sys
+    import urllib.request
+
+    base_url = f"https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/{branch}/agent"
+    install_dir = os.path.dirname(os.path.abspath(__file__))
+    updated, failed = [], []
+
+    for f in _AGENT_FILES:
+        url  = f"{base_url}/{f}"
+        dest = os.path.join(install_dir, f.replace("/", os.sep))
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            urllib.request.urlretrieve(url, dest)
+            updated.append(f)
+        except Exception as e:
+            failed.append(f"{f}: {e}")
+            logger.error("update_agent: не вдалось завантажити %s: %s", f, e)
+
+    if failed:
+        return False, f"Оновлено {len(updated)}, помилки: {'; '.join(failed[:3])}"
+
+    logger.info("update_agent: оновлено %d файлів, перезапуск…", len(updated))
+    # Watchdog перезапустить процес після виходу
+    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__.replace("actions.py", "agent.py"))])
+    return True, f"Оновлено {len(updated)} файлів"
