@@ -1,6 +1,8 @@
 #!/bin/bash
-# bootstrap.sh — встановлення на свіжий Ubuntu 22.04
+# bootstrap.sh — встановлення на свіжий Ubuntu 22.04+
 set -e
+
+REPO_DIR=/opt/sx-monitor-server
 
 echo "=== SX Monitor Server Bootstrap ==="
 
@@ -21,14 +23,14 @@ else
     echo "[2/4] Docker Compose вже встановлений"
 fi
 
-# Клонування репо
-if [ ! -d "sx-monitor-server" ]; then
-    echo "[3/4] Клонування репозиторію..."
-    git clone https://github.com/vskoropada-rgb/sx-monitor-server.git
-    cd sx-monitor-server
+# Клонування репо в /opt/sx-monitor-server (сюди ж деплоїть CI/CD)
+if [ ! -d "$REPO_DIR" ]; then
+    echo "[3/4] Клонування репозиторію в $REPO_DIR..."
+    git clone https://github.com/vskoropada-rgb/sx-monitor-server.git "$REPO_DIR"
+    cd "$REPO_DIR"
 else
     echo "[3/4] Репозиторій вже існує"
-    cd sx-monitor-server
+    cd "$REPO_DIR"
     git pull
 fi
 
