@@ -30,7 +30,33 @@ def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
         geo_str = f" [{geo}]" if geo else ""
         lines.append(f"🔑 {ip}{geo_str} — {entry['count']} спроб")
 
-    is_security = any(t in tags for t in ("#brute_force", "#new_ip", "#admin", "#files"))
+    if "#new_ip" in tags:
+        for login in metrics.get("new_ip_alerts", [])[:3]:
+            lines.append(f"🖥 {login['ip']} → {login['username']} ({login.get('time','')})")
+
+    if "#admin" in tags:
+        for a in metrics.get("new_admins", [])[:3]:
+            lines.append(f"👤 {a['username']} доданий ким: {a['added_by']}")
+
+    if "#usb" in tags:
+        for d in metrics.get("new_usb_devices", [])[:3]:
+            lines.append(f"🔌 {d.get('name', d.get('instance_id', '?'))}")
+
+    if "#files" in tags:
+        for f in metrics.get("changed_files", [])[:3]:
+            lines.append(f"📄 {f['path']} ({f.get('modified','')})")
+
+    if "#schtask" in tags:
+        for t in metrics.get("new_scheduled_tasks", [])[:3]:
+            lines.append(f"⏰ {t.get('name','?')}")
+
+    if "#software" in tags:
+        for s in metrics.get("new_software", [])[:3]:
+            lines.append(f"📦 {s.get('name','?')}")
+
+    is_security = any(t in tags for t in (
+        "#brute_force", "#new_ip", "#admin", "#files", "#usb", "#schtask", "#software"
+    ))
     if not is_security:
         block = _metrics_block(metrics)
         if block:

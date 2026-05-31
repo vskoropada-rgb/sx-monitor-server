@@ -162,6 +162,31 @@ def _build_context(metrics: dict, config: dict) -> str:
         for login in metrics["new_ip_alerts"]:
             lines.append(f"IP: {login['ip']}, юзер: {login['username']}")
 
+    if metrics.get("new_admins"):
+        lines.append("\n=== НОВІ АДМІНИ ===")
+        for a in metrics["new_admins"]:
+            lines.append(f"Доданий: {a['username']}, ким: {a['added_by']}")
+
+    if metrics.get("new_usb_devices"):
+        lines.append("\n=== НОВІ USB ===")
+        for d in metrics["new_usb_devices"]:
+            lines.append(f"Пристрій: {d.get('name', d.get('instance_id', '?'))}")
+
+    if metrics.get("changed_files"):
+        lines.append("\n=== ЗМІНИ ФАЙЛІВ ===")
+        for f in metrics["changed_files"]:
+            lines.append(f"Змінено: {f['path']}, час: {f.get('modified', '?')}")
+
+    if metrics.get("new_software"):
+        lines.append("\n=== НОВИЙ СОФТ ===")
+        for s in metrics["new_software"][:5]:
+            lines.append(f"Встановлено: {s.get('name', '?')}")
+
+    if metrics.get("new_scheduled_tasks"):
+        lines.append("\n=== НОВІ ЗАДАЧІ ===")
+        for t in metrics["new_scheduled_tasks"][:5]:
+            lines.append(f"Задача: {t.get('name', '?')}")
+
     if "status" in metrics and "latest_file" in metrics:
         lines.append("\n=== БЕКАПИ ===")
         lines.append(f"Статус: {metrics['status']}, "
@@ -201,10 +226,25 @@ def _fallback_rules(metrics: dict, config: dict, stable_key: str = None) -> Opti
     for svc_name in metrics.get("newly_stopped", []):
         alerts.append(("critical", f"Сервіс зупинився: {svc_name}", ["#critical", "#service"]))
 
+    for dev in metrics.get("new_usb_devices", []):
+        name = dev.get("name", dev.get("instance_id", "?"))
+        alerts.append(("warning", f"Новий USB: {name}", ["#warning", "#usb", "#security"]))
+
+    for f in metrics.get("changed_files", []):
+        alerts.append(("critical", f"Змінено файл: {f['path']}", ["#critical", "#files", "#security"]))
+
+    if metrics.get("new_scheduled_tasks"):
+        task = metrics["new_scheduled_tasks"][0]
+        alerts.append(("warning", f"Нова задача: {task.get('name','?')}", ["#warning", "#schtask", "#security"]))
+
+    if metrics.get("new_software"):
+        sw = metrics["new_software"][0]
+        alerts.append(("warning", f"Встановлено: {sw.get('name','?')}", ["#warning", "#software"]))
+
     if metrics.get("status") == "critical":
-        alerts.append(("critical", f"Критична проблема з бекапом", ["#critical", "#backup"]))
+        alerts.append(("critical", "Критична проблема з бекапом", ["#critical", "#backup"]))
     elif metrics.get("status") == "warning":
-        alerts.append(("warning", f"Проблема з бекапом", ["#warning", "#backup"]))
+        alerts.append(("warning", "Проблема з бекапом", ["#warning", "#backup"]))
 
     if not alerts:
         return None
