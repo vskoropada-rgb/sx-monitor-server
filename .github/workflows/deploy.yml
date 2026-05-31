@@ -21,3 +21,4 @@ jobs:
             git pull origin main
             docker compose up -d --build
             docker compose ps
+            echo "Deploy completed: $(date)"
