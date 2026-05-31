@@ -117,10 +117,8 @@ def register_server(
 
     if existing:
         existing.name = payload.get("name", existing.name)
-        # Тему створюємо лише якщо її ще немає і агент не передав свою
-        if topic_id:
-            existing.tg_topic_id = topic_id
-        elif not existing.tg_topic_id:
+        # Топік управляється виключно сервером — ігноруємо tg_topic_id від агента
+        if not existing.tg_topic_id:
             existing.tg_topic_id = _create_forum_topic(existing.name)
         db.commit()
         _send_registration_message(existing.name, existing.tg_topic_id, "updated")
