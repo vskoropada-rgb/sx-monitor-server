@@ -2,6 +2,7 @@
 collectors/security.py — безпека: перебір паролів, нові адміни, зміни файлів
 """
 import logging
+import re
 import win32evtlog
 import win32evtlogutil
 import win32con
@@ -14,6 +15,9 @@ from storage import (get_known_admins, add_known_admin,
                      get_file_hash, update_file_hash)
 
 logger = logging.getLogger(__name__)
+
+_IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+_BAD_IPS = {"-", "", "::1", "127.0.0.1", "0.0.0.0"}
 
 
 def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
@@ -40,29 +44,54 @@ def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
                     return events
         win32evtlog.CloseEventLog(hand)
     except Exception as e:
-        pass
+        logger.warning("_get_events(%s) failed: %s", source, e)
     return events
 
 
 def _extract_ip_from_strings(strings: list, event_id: int) -> str:
-    """Вилучає IP з StringInserts різних типів подій."""
+    """Вилучає IP з StringInserts різних типів подій.
+
+    Спочатку перевіряє відомі індекси, потім сканує всі поля як fallback.
+    """
     if not strings:
         return "unknown"
+
+    def _clean(s: str) -> str:
+        return s.replace("::ffff:", "").strip()
+
     candidates = []
     if event_id == 4625:
-        # Field 19 = Source Network Address, field 11 = Workstation Name (fallback)
-        for idx in (19, 11):
+        # Field 19 = IpAddress, field 13 = WorkstationName (fallback)
+        for idx in (19, 13):
             if idx < len(strings) and strings[idx]:
-                candidates.append(strings[idx].strip())
+                candidates.append(_clean(strings[idx]))
     elif event_id == 4771:
         # Field 6 = Client Address (може бути ::ffff:1.2.3.4)
         if len(strings) > 6 and strings[6]:
-            candidates.append(strings[6].strip())
+            candidates.append(_clean(strings[6]))
+
+    # Перевіряємо відомі індекси першими
     for c in candidates:
-        c = c.replace("::ffff:", "")
-        if c and c not in ("-", "", "::1", "127.0.0.1"):
+        if c and c not in _BAD_IPS and _IP_RE.match(c):
             return c
-    return candidates[0].replace("::ffff:", "") if candidates else "unknown"
+
+    # Fallback: скануємо всі StringInserts в пошуку будь-якого публічного IP
+    for s in strings:
+        if not s:
+            continue
+        c = _clean(s)
+        if c not in _BAD_IPS and _IP_RE.match(c):
+            logger.debug("_extract_ip fallback found IP %r in strings: %s", c,
+                         [str(x)[:30] if x else None for x in strings])
+            return c
+
+    # Останній шанс — перший кандидат без перевірки формату
+    if candidates:
+        c = candidates[0]
+        if c and c not in _BAD_IPS:
+            return c
+
+    return "unknown"
 
 
 def collect_brute_force(config: dict) -> dict:
@@ -92,11 +121,14 @@ def collect_brute_force(config: dict) -> dict:
             else:  # 4771
                 username = strings[0].strip() if strings and strings[0] else "unknown"
             ip_attempts[ip].append(username)
-        except Exception:
-            pass
+            logger.debug("brute_force event %d: ip=%r user=%r strings_len=%d",
+                         event_id, ip, username, len(strings))
+        except Exception as e:
+            logger.warning("brute_force parse error: %s", e)
 
-    logger.info("brute_force: зібрано %d подій (4625+4771) за %d хв, унікальних IP: %d",
-                len(events), window_min, len(ip_attempts))
+    logger.info("brute_force: зібрано %d подій (4625+4771) за %d хв, унікальних IP: %d, розподіл: %s",
+                len(events), window_min, len(ip_attempts),
+                {ip: len(u) for ip, u in ip_attempts.items()})
 
     alerts = []
     suspicious_ips = []  # лише реальні IP (для кнопки блокування)
