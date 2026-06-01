@@ -254,6 +254,12 @@ def main():
         logger.critical("API_URL / API_KEY не задані в .env — агент не може стартувати")
         sys.exit(1)
 
+    import storage as _storage
+    try:
+        _storage.init_db()
+    except Exception as e:
+        logger.error("init_db failed: %s", e)
+
     logger.info("=== SX Monitor Agent старт ===")
     logger.info("SERVER_ID=%s  API_URL=%s", config.get("SERVER_ID"), config.get("API_URL"))
 
