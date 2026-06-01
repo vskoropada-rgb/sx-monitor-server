@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
 from database import get_db
-from models import Server, Metric, MetricsSnapshot
+from models import Server, Metric, MetricsSnapshot, RdpLog
 from auth import get_server
 
 router = APIRouter(prefix="/api", tags=["metrics"])
@@ -43,10 +43,35 @@ def receive_metrics(
     db.execute(stmt)
     db.commit()
 
+    # Зберігаємо нові RDP-входи (дедуплікація через UNIQUE constraint)
+    _save_rdp_events(db, server.id, payload.get("recent_logins", []))
+
     # Аналіз і відправка алертів — у фоні щоб не блокувати агента
     background.add_task(_analyze_and_alert, server.id, server.name, payload)
 
     return {"ok": True}
+
+
+def _save_rdp_events(db: Session, server_id: str, logins: list):
+    for entry in logins:
+        time_str = entry.get("time", "")
+        if not time_str:
+            continue
+        try:
+            event_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        try:
+            db.add(RdpLog(
+                server_id=server_id,
+                username=entry.get("username", ""),
+                ip=entry.get("ip", ""),
+                is_new_ip=1 if entry.get("is_new_ip") else 0,
+                event_time=event_time,
+            ))
+            db.commit()
+        except Exception:
+            db.rollback()   # порушення UNIQUE — дублікат, пропускаємо
 
 
 def _save_numeric_metrics(db: Session, server_id: str, payload: dict, now: datetime):

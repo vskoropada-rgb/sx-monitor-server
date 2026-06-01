@@ -108,6 +108,23 @@ class KnownEntity(Base):
     last_seen   = Column(DateTime, default=datetime.utcnow)
 
 
+class RdpLog(Base):
+    """Журнал RDP-входів з агентів."""
+    __tablename__ = "rdp_log"
+    __table_args__ = (
+        Index("idx_rdp_log_server_time", "server_id", "event_time"),
+        UniqueConstraint("server_id", "username", "ip", "event_time", name="uq_rdp_event"),
+    )
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    server_id  = Column(String, ForeignKey("servers.id"), nullable=False)
+    username   = Column(String, nullable=False)
+    ip         = Column(String)
+    is_new_ip  = Column(Integer, default=0)   # 0/1
+    event_time = Column(DateTime, nullable=False)
+    logged_at  = Column(DateTime, default=datetime.utcnow)
+
+
 class LoginLog(Base):
     """Журнал входів і виходів адміністраторів."""
     __tablename__ = "login_logs"

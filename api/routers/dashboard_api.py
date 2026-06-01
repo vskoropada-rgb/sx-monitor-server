@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from database import get_db
-from models import Server, MetricsSnapshot, Alert, Command, PendingAlert, Metric, LoginLog
+from models import Server, MetricsSnapshot, Alert, Command, PendingAlert, Metric, LoginLog, RdpLog
 import security
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
@@ -238,6 +238,26 @@ def command_log(limit: int = 50, db: Session = Depends(get_db)):
             "executed_at": c.executed_at.isoformat() if c.executed_at else None,
         }
         for c in cmds
+    ]
+
+
+@router.get("/servers/{server_id}/rdp-log")
+def rdp_log(server_id: str, limit: int = 200, db: Session = Depends(get_db)):
+    rows = (
+        db.query(RdpLog)
+        .filter(RdpLog.server_id == server_id)
+        .order_by(RdpLog.event_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "username":   r.username,
+            "ip":         r.ip,
+            "is_new_ip":  bool(r.is_new_ip),
+            "event_time": r.event_time.isoformat() if r.event_time else None,
+        }
+        for r in rows
     ]
 
 

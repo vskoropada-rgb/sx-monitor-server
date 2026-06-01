@@ -20,7 +20,9 @@ import {
   Database,
   BarChart2,
   Download,
+  History,
 } from "lucide-react";
+import type { RdpLogEntry } from "@/lib/api";
 import {
   LineChart,
   Line,
@@ -324,6 +326,13 @@ export function ServerDetail() {
     queryFn: () => api.serverDetail(id!),
     enabled: !!id,
     refetchInterval: 15000,
+  });
+
+  const { data: rdpLog = [] } = useQuery({
+    queryKey: ["rdpLog", id],
+    queryFn: () => api.rdpLog(id!),
+    enabled: !!id,
+    refetchInterval: 60000,
   });
 
   if (isLoading) {
@@ -650,11 +659,11 @@ export function ServerDetail() {
           </Card>
         )}
 
-        {/* ── Section 7: RDP Сесії ─────────────────────────────────────────── */}
+        {/* ── Section 7: RDP Активні сесії ────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-accent" />
-            <span className="font-semibold">RDP Сесії</span>
+            <span className="font-semibold">Активні RDP сесії</span>
           </CardHeader>
           <CardBody>
             {activeSessions.length === 0 ? (
@@ -684,6 +693,49 @@ export function ServerDetail() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </CardBody>
+        </Card>
+
+        {/* ── Section 7b: Журнал RDP входів ───────────────────────────────── */}
+        <Card>
+          <CardHeader className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <History className="w-4 h-4 text-accent" />
+              <span className="font-semibold">Журнал RDP входів</span>
+            </div>
+            <span className="text-xs text-muted">{rdpLog.length} записів</span>
+          </CardHeader>
+          <CardBody className="p-0 max-h-72 overflow-y-auto">
+            {rdpLog.length === 0 ? (
+              <p className="text-sm text-muted px-4 py-3">Записів ще немає — з'являться після наступного RDP-входу</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-panel">
+                  <tr className="text-xs text-muted border-b border-border/60">
+                    <th className="text-left px-4 py-2 w-36">Час</th>
+                    <th className="text-left px-4 py-2">Користувач</th>
+                    <th className="text-left px-4 py-2">IP</th>
+                    <th className="text-left px-4 py-2 w-20">Новий IP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {rdpLog.map((e: RdpLogEntry, i: number) => (
+                    <tr key={i} className={cn("hover:bg-panel2/40", e.is_new_ip ? "bg-warn/5" : "")}>
+                      <td className="px-4 py-2 text-xs text-muted whitespace-nowrap">
+                        {fmtDateTime(e.event_time)}
+                      </td>
+                      <td className="px-4 py-2 font-mono text-xs">{e.username}</td>
+                      <td className="px-4 py-2 font-mono text-xs">{e.ip ?? "—"}</td>
+                      <td className="px-4 py-2">
+                        {e.is_new_ip && (
+                          <Badge tone="warn">новий</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </CardBody>
         </Card>

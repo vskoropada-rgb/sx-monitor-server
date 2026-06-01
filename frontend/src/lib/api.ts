@@ -95,6 +95,13 @@ export interface ServerDetail {
   }>;
 }
 
+export interface RdpLogEntry {
+  username: string;
+  ip: string | null;
+  is_new_ip: boolean;
+  event_time: string | null;
+}
+
 export interface LoginLogEntry {
   id: number;
   admin_id: number;
@@ -117,6 +124,7 @@ export const api = {
     req<HistoryPoint[]>(
       `/api/dashboard/servers/${id}/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
     ),
+  rdpLog: (id: string) => req<RdpLogEntry[]>(`/api/dashboard/servers/${id}/rdp-log`),
   authLogs: () => req<LoginLogEntry[]>("/api/dashboard/auth-logs"),
   logout: () =>
     fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }),
