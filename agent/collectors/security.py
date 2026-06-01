@@ -43,10 +43,10 @@ def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
 
 def collect_brute_force(config: dict) -> dict:
     """Event ID 4625 — невдалі спроби входу"""
-    window_min = int(config.get("BRUTE_FORCE_WINDOW_MIN", 5))
+    window_min = int(config.get("BRUTE_FORCE_WINDOW_MIN", 10))
     threshold = int(config.get("BRUTE_FORCE_THRESHOLD", 5))
     # Окремий поріг для локальних спроб (IP="-"): вони не мережева атака
-    local_threshold = int(config.get("BRUTE_FORCE_LOCAL_THRESHOLD", 50))
+    local_threshold = int(config.get("BRUTE_FORCE_LOCAL_THRESHOLD", 20))
     known_networks_str = config.get("KNOWN_IPS", "192.168.1.0/24")
 
     known_networks = []

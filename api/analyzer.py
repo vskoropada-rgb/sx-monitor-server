@@ -212,9 +212,15 @@ def _fallback_rules(metrics: dict, config: dict, stable_key: str = None) -> Opti
                 alerts.append(("warning", f"Диск {d['path']}: мало місця {d['free_pct']}%", ["#warning", "#disk"]))
 
     for bf in metrics.get("brute_force_alerts", []):
-        if bf.get("ip") and not bf["is_known_network"]:
+        if not bf.get("ip"):
+            continue
+        if not bf["is_known_network"]:
             alerts.append(("critical", f"Перебір паролів {bf['ip']}: {bf['count']} спроб",
                            ["#critical", "#brute_force", "#security"]))
+        else:
+            # Відома мережа, але все одно підозріло — warning
+            alerts.append(("warning", f"Невдалі входи {bf['ip']}: {bf['count']} спроб (внутр. мережа)",
+                           ["#warning", "#brute_force", "#security"]))
 
     if metrics.get("new_admins"):
         alerts.append(("critical", "Новий адміністратор доданий", ["#critical", "#security", "#admin"]))

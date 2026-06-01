@@ -1,7 +1,6 @@
 import { ServerCard } from "@/components/ServerCard";
 import { AlertsPanel } from "@/components/AlertsPanel";
 import { CommandLog } from "@/components/CommandLog";
-import { AuthLog } from "@/components/AuthLog";
 import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, LogOut, RefreshCw } from "lucide-react";
@@ -60,10 +59,6 @@ export function Dashboard() {
         <section className="grid gap-4 lg:grid-cols-2 h-[420px]">
           <AlertsPanel />
           <CommandLog />
-        </section>
-
-        <section className="h-[320px]">
-          <AuthLog />
         </section>
       </main>
     </div>
