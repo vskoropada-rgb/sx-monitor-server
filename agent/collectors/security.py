@@ -1,6 +1,7 @@
 """
 collectors/security.py — безпека: перебір паролів, нові адміни, зміни файлів
 """
+import logging
 import win32evtlog
 import win32evtlogutil
 import win32con
@@ -11,6 +12,8 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from storage import (get_known_admins, add_known_admin,
                      get_file_hash, update_file_hash)
+
+logger = logging.getLogger(__name__)
 
 
 def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
@@ -41,11 +44,31 @@ def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
     return events
 
 
+def _extract_ip_from_strings(strings: list, event_id: int) -> str:
+    """Вилучає IP з StringInserts різних типів подій."""
+    if not strings:
+        return "unknown"
+    candidates = []
+    if event_id == 4625:
+        # Field 19 = Source Network Address, field 11 = Workstation Name (fallback)
+        for idx in (19, 11):
+            if idx < len(strings) and strings[idx]:
+                candidates.append(strings[idx].strip())
+    elif event_id == 4771:
+        # Field 6 = Client Address (може бути ::ffff:1.2.3.4)
+        if len(strings) > 6 and strings[6]:
+            candidates.append(strings[6].strip())
+    for c in candidates:
+        c = c.replace("::ffff:", "")
+        if c and c not in ("-", "", "::1", "127.0.0.1"):
+            return c
+    return candidates[0].replace("::ffff:", "") if candidates else "unknown"
+
+
 def collect_brute_force(config: dict) -> dict:
-    """Event ID 4625 — невдалі спроби входу"""
+    """Event ID 4625 (NTLM) + 4771 (Kerberos) — невдалі спроби входу."""
     window_min = int(config.get("BRUTE_FORCE_WINDOW_MIN", 10))
     threshold = int(config.get("BRUTE_FORCE_THRESHOLD", 5))
-    # Окремий поріг для локальних спроб (IP="-"): вони не мережева атака
     local_threshold = int(config.get("BRUTE_FORCE_LOCAL_THRESHOLD", 20))
     known_networks_str = config.get("KNOWN_IPS", "192.168.1.0/24")
 
@@ -56,18 +79,24 @@ def collect_brute_force(config: dict) -> dict:
         except Exception:
             pass
 
-    events = _get_events("Security", [4625], minutes=window_min)
+    events = _get_events("Security", [4625, 4771], minutes=window_min)
     ip_attempts = defaultdict(list)
 
     for rec in events:
         try:
-            strings = rec.StringInserts
-            if strings and len(strings) > 19:
-                ip = strings[19].strip() if strings[19] else "unknown"
-                username = strings[5].strip() if strings[5] else "unknown"
-                ip_attempts[ip].append(username)
+            strings = rec.StringInserts or []
+            event_id = rec.EventID & 0xFFFF
+            ip = _extract_ip_from_strings(strings, event_id)
+            if event_id == 4625:
+                username = strings[5].strip() if len(strings) > 5 and strings[5] else "unknown"
+            else:  # 4771
+                username = strings[0].strip() if strings and strings[0] else "unknown"
+            ip_attempts[ip].append(username)
         except Exception:
             pass
+
+    logger.info("brute_force: зібрано %d подій (4625+4771) за %d хв, унікальних IP: %d",
+                len(events), window_min, len(ip_attempts))
 
     alerts = []
     suspicious_ips = []  # лише реальні IP (для кнопки блокування)
