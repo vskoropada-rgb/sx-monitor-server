@@ -49,10 +49,12 @@ function statusTone(s: string): "ok" | "crit" | "accent" | "muted" {
   return "muted";
 }
 
+const TZ = "Europe/Kyiv";
+
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: TZ });
 }
 
 function fmtDateTime(iso: string | null): string {
@@ -63,17 +65,18 @@ function fmtDateTime(iso: string | null): string {
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: TZ,
   });
 }
 
 function maintenanceTime(iso: string): string {
   const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
 }
 
 function chartTime(iso: string): string {
   const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
 }
 
 // ── sub-sections ───────────────────────────────────────────────────────────────
@@ -223,14 +226,14 @@ function ExportSection({
       doc.setFontSize(10);
       doc.setTextColor(120);
       doc.text(`Період: ${from} — ${to}`, 14, 26);
-      doc.text(`Сформовано: ${new Date().toLocaleString("uk-UA")}`, 14, 32);
+      doc.text(`Сформовано: ${new Date().toLocaleString("uk-UA", { timeZone: TZ })}`, 14, 32);
       doc.setTextColor(0);
 
       doc.setFontSize(12);
       doc.text("Метрики CPU / RAM", 14, 44);
 
       const tableRows = history.slice(0, 500).map((p: HistoryPoint) => [
-        new Date(p.time.endsWith("Z") ? p.time : p.time + "Z").toLocaleString("uk-UA"),
+        new Date(p.time.endsWith("Z") ? p.time : p.time + "Z").toLocaleString("uk-UA", { timeZone: TZ }),
         p.cpu != null ? `${p.cpu}%` : "—",
         p.ram != null ? `${p.ram}%` : "—",
       ]);
