@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import type { HistoryPoint, SlaResult } from "@/lib/api";
+import type { HistoryPoint, SlaResult, DiskForecast } from "@/lib/api";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { UsageBar } from "@/components/ui/Stat";
@@ -270,12 +270,23 @@ function ExportSection({
   recentAlerts,
   disks,
   slaData,
+  backup,
+  diskForecasts,
 }: {
   serverId: string;
   serverName: string;
   recentAlerts: Array<{ severity: string; message: string; sent_at: string | null }>;
   disks: any[];
   slaData?: SlaResult;
+  backup?: {
+    status?: string;
+    recent_files?: Array<{ name: string; size_mb: number; age_hours: number; time: string }>;
+    latest_file?: string;
+    latest_time?: string;
+    latest_size_mb?: number;
+    total_files?: number;
+  };
+  diskForecasts?: DiskForecast[];
 }) {
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
@@ -288,7 +299,7 @@ function ExportSection({
       const endISO   = new Date(to   + "T23:59:59+03:00").toISOString();
       const history  = await api.serverHistoryRange(serverId, startISO, endISO);
 
-      // Sample down to ≤200 points for the chart
+      // Sample to ≤200 points for the chart
       const MAX_PTS = 200;
       const step = Math.max(1, Math.ceil(history.length / MAX_PTS));
       const pts = history.filter((_, i) => i % step === 0);
@@ -296,36 +307,57 @@ function ExportSection({
       // Summary stats
       const cpuVals = pts.filter(p => p.cpu != null).map(p => p.cpu!);
       const ramVals = pts.filter(p => p.ram != null).map(p => p.ram!);
-      const avg = (a: number[]) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
-      const avgCpu = avg(cpuVals);
+      const avgArr  = (a: number[]) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+      const avgCpu = avgArr(cpuVals);
       const maxCpu = cpuVals.length ? Math.max(...cpuVals) : null;
-      const avgRam = avg(ramVals);
+      const avgRam = avgArr(ramVals);
       const maxRam = ramVals.length ? Math.max(...ramVals) : null;
 
-      const alertRows = recentAlerts.slice(0, 15).map(a => ({
-        time: fmtDateTime(a.sent_at),
-        sev:  a.severity,
-        msg:  a.message,
-      }));
+      // Backup files: prefer those within the selected period, fall back to most recent
+      const allBackupFiles = backup?.recent_files ?? [];
+      const periodStart = new Date(from + "T00:00:00");
+      const periodEnd   = new Date(to   + "T23:59:59");
+      const backupInPeriod = allBackupFiles.filter(f => {
+        const d = new Date(f.time);
+        return d >= periodStart && d <= periodEnd;
+      });
+      const backupRows = (backupInPeriod.length > 0 ? backupInPeriod : allBackupFiles).slice(0, 10);
+      const backupLabelInPeriod = backupInPeriod.length > 0;
 
-      // ── Canvas layout constants ────────────────────────────────────────────
-      const SCALE  = 2;     // retina quality
-      const PW     = 794;   // logical px (A4 @ 96dpi)
-      const M      = 24;    // margin
-      const CW     = PW - M * 2;
+      const alertRows = recentAlerts.slice(0, 15);
 
-      const HEADER_H = 82;
-      const STATS_H  = 80;
-      const SLA_H    = slaData ? 60 : 0;
-      const CHART_H  = 256;
-      const DISK_H   = disks.length > 0 ? 28 + Math.min(disks.length, 6) * 24 : 0;
-      const ALERT_H  = alertRows.length > 0 ? 40 + alertRows.length * 22 : 0;
-      const TOTAL_H  = M + HEADER_H + 14 + STATS_H
-                     + (SLA_H  ? 12 + SLA_H  : 0)
-                     + 12 + CHART_H
-                     + (DISK_H  ? 14 + DISK_H  : 0)
-                     + (ALERT_H ? 14 + ALERT_H : 0)
-                     + M;
+      // ── Canvas layout ──────────────────────────────────────────────────────
+      const SCALE = 2;
+      const PW    = 794;
+      const M     = 28;
+      const CW    = PW - M * 2;
+      const GAP   = 14;
+      const R     = 7;   // card corner radius
+
+      const HEADER_H = 88;
+      const STATS_H  = 92;
+      const CHART_H  = 270;
+      const SLA_H    = slaData ? 78 : 0;
+      const DISK_H   = disks.length > 0
+        ? 26 + Math.min(disks.length, 6) * 32 + 8
+        : 0;
+      const BACKUP_H = backupRows.length > 0
+        ? 26 + backupRows.length * 22 + 8
+        : 0;
+      const ALERT_H  = alertRows.length > 0
+        ? 26 + alertRows.length * 22 + 8
+        : 0;
+      const FOOTER_H = 36;
+
+      const TOTAL_H =
+        M + HEADER_H + GAP
+        + STATS_H + GAP
+        + CHART_H + GAP
+        + (SLA_H    > 0 ? SLA_H    + GAP : 0)
+        + (DISK_H   > 0 ? DISK_H   + GAP : 0)
+        + (BACKUP_H > 0 ? BACKUP_H + GAP : 0)
+        + (ALERT_H  > 0 ? ALERT_H  + GAP : 0)
+        + FOOTER_H + M;
 
       const canvas = document.createElement("canvas");
       canvas.width  = PW    * SCALE;
@@ -333,218 +365,381 @@ function ExportSection({
       const ctx = canvas.getContext("2d")!;
       ctx.scale(SCALE, SCALE);
 
-      // White background
-      ctx.fillStyle = "#ffffff";
+      // ── Background ─────────────────────────────────────────────────────────
+      ctx.fillStyle = "#eef2f7";
       ctx.fillRect(0, 0, PW, TOTAL_H);
 
       let y = M;
 
-      // ── 1. Header ───────────────────────────────────────────────────────────
-      ctx.fillStyle = "#1e3a8a";
-      ctx.fillRect(M, y, CW, HEADER_H);
-      // top shimmer
-      ctx.fillStyle = "rgba(255,255,255,0.07)";
-      ctx.fillRect(M, y, CW, 5);
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 20px Arial";
-      ctx.fillText(`Звіт: ${serverName}`, M + 16, y + 32);
-      ctx.fillStyle = "rgba(255,255,255,0.72)";
-      ctx.font = "11px Arial";
-      ctx.fillText(`Період: ${from} — ${to}`, M + 16, y + 52);
-      ctx.fillText(
-        `Сформовано: ${new Date().toLocaleString("uk-UA", { timeZone: TZ })}`,
-        M + 16, y + 68
-      );
-      y += HEADER_H + 14;
-
-      // ── 2. Stats row ────────────────────────────────────────────────────────
-      const statItems = [
-        { label: "Середній CPU", value: avgCpu != null ? `${avgCpu.toFixed(1)}%` : "—", accent: "#22d3ee" },
-        { label: "Пік CPU",      value: maxCpu != null ? `${maxCpu.toFixed(1)}%` : "—", accent: "#ef4444" },
-        { label: "Середній RAM", value: avgRam != null ? `${avgRam.toFixed(1)}%` : "—", accent: "#22d3ee" },
-        { label: "Пік RAM",      value: maxRam != null ? `${maxRam.toFixed(1)}%` : "—", accent: "#f97316" },
-      ];
-      const sW = (CW - 12) / 4;
-      statItems.forEach((s, i) => {
-        const sx = M + i * (sW + 4);
-        ctx.fillStyle = "#f1f5f9";
-        ctx.fillRect(sx, y, sW, 68);
-        ctx.fillStyle = s.accent;
-        ctx.fillRect(sx, y, 4, 68);
-        ctx.fillStyle = "#0f172a";
-        ctx.font = "bold 22px Arial";
-        ctx.fillText(s.value, sx + 14, y + 38);
-        ctx.fillStyle = "#64748b";
-        ctx.font = "11px Arial";
-        ctx.fillText(s.label, sx + 14, y + 56);
-      });
-      y += STATS_H;
-
-      // ── 3. SLA ──────────────────────────────────────────────────────────────
-      if (slaData) {
-        y += 12;
-        ctx.fillStyle = "#f1f5f9";
-        ctx.fillRect(M, y, CW, SLA_H);
-        const slaColor = slaData.uptime_pct >= 99.9 ? "#16a34a"
-                       : slaData.uptime_pct >= 99.0 ? "#d97706" : "#dc2626";
-        ctx.fillStyle = slaColor;
-        ctx.fillRect(M, y, 4, SLA_H);
-        ctx.fillStyle = "#0f172a";
-        ctx.font = "bold 13px Arial";
-        ctx.fillText("SLA поточного місяця", M + 14, y + 22);
-        ctx.fillStyle = slaColor;
-        ctx.font = "bold 20px Arial";
-        const slaStr = `${slaData.uptime_pct}%`;
-        const slaX = M + CW - ctx.measureText(slaStr).width - 14;
-        ctx.fillText(slaStr, slaX, y + 26);
-        ctx.fillStyle = "#64748b";
-        ctx.font = "11px Arial";
-        const dt = slaData.downtime_min > 0 ? fmtDowntime(slaData.downtime_min) : "0";
-        ctx.fillText(
-          `Простій: ${dt} · Інциденти: ${slaData.incidents.length}`,
-          M + 14, y + 44
-        );
-        y += SLA_H;
+      // ── Helpers ────────────────────────────────────────────────────────────
+      function card(cx: number, cy: number, cw: number, ch: number, bg = "#ffffff") {
+        ctx.beginPath();
+        ctx.roundRect(cx, cy, cw, ch, R);
+        ctx.fillStyle = bg;
+        ctx.fill();
+        ctx.strokeStyle = "#dde3ed";
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
       }
 
-      // ── 4. Chart ────────────────────────────────────────────────────────────
-      y += 12;
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(M, y, CW, CHART_H);
+      function secLabel(text: string, lx: number, ly: number) {
+        ctx.fillStyle = "#8898aa";
+        ctx.font = "bold 8.5px Arial";
+        ctx.fillText(text.toUpperCase(), lx, ly);
+      }
+
+      // Area + line chart helper
+      function drawAreaLine(key: "cpu" | "ram", lineC: string, fillC: string,
+                            ax: number, ay: number, aw: number, ah: number) {
+        if (pts.length < 2) return;
+        const mapped = pts.map((p, i) => {
+          const v = p[key];
+          if (v == null) return null;
+          return { x: ax + (i / (pts.length - 1)) * aw, y: ay + ah - (v / 100) * ah };
+        });
+        const valid = mapped.filter(Boolean) as { x: number; y: number }[];
+        if (valid.length < 2) return;
+
+        // Area fill
+        const grad = ctx.createLinearGradient(0, ay, 0, ay + ah);
+        grad.addColorStop(0, fillC);
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(valid[0].x, valid[0].y);
+        valid.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.lineTo(valid[valid.length - 1].x, ay + ah);
+        ctx.lineTo(valid[0].x, ay + ah);
+        ctx.closePath();
+        ctx.fill();
+
+        // Line
+        ctx.strokeStyle = lineC;
+        ctx.lineWidth = 1.8;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(valid[0].x, valid[0].y);
+        valid.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.stroke();
+      }
+
+      // ── 1. Header ───────────────────────────────────────────────────────────
+      ctx.beginPath();
+      ctx.roundRect(M, y, CW, HEADER_H, R);
+      const hGrad = ctx.createLinearGradient(M, y, M + CW, y);
+      hGrad.addColorStop(0, "#0f172a");
+      hGrad.addColorStop(1, "#1e3a8a");
+      ctx.fillStyle = hGrad;
+      ctx.fill();
+
+      // accent bottom line
+      ctx.fillStyle = "#3b82f6";
+      ctx.fillRect(M, y + HEADER_H - 4, CW, 4);
+
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("SX Monitor", M + CW - 16, y + 18);
+      ctx.textAlign = "left";
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 22px Arial";
+      ctx.fillText(serverName, M + 20, y + 37);
+
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.font = "11px Arial";
+      ctx.fillText(`Звітний період: ${from} — ${to}`, M + 20, y + 56);
+      ctx.fillText(
+        `Сформовано: ${new Date().toLocaleString("uk-UA", { timeZone: TZ })}  ·  ${history.length} точок даних`,
+        M + 20, y + 74
+      );
+      y += HEADER_H + GAP;
+
+      // ── 2. Stats row (4 cards) ──────────────────────────────────────────────
+      const slaColor = slaData
+        ? (slaData.uptime_pct >= 99.9 ? "#16a34a" : slaData.uptime_pct >= 99 ? "#d97706" : "#dc2626")
+        : "#64748b";
+      const bkColor = backup?.status === "critical" ? "#dc2626"
+                    : backup?.status === "warning"  ? "#d97706"
+                    : backup?.latest_time           ? "#16a34a"
+                    : "#64748b";
+
+      const statItems = [
+        {
+          label: "Середній CPU",
+          value: avgCpu != null ? `${avgCpu.toFixed(1)}%` : "—",
+          sub:   maxCpu != null ? `пік ${maxCpu.toFixed(1)}%` : "",
+          color: "#06b6d4",
+        },
+        {
+          label: "Середній RAM",
+          value: avgRam != null ? `${avgRam.toFixed(1)}%` : "—",
+          sub:   maxRam != null ? `пік ${maxRam.toFixed(1)}%` : "",
+          color: "#f97316",
+        },
+        {
+          label: "SLA / Uptime",
+          value: slaData ? `${slaData.uptime_pct}%` : "—",
+          sub:   slaData ? `${slaData.incidents.length} інц. · ${fmtDowntime(slaData.downtime_min)} простою` : "",
+          color: slaColor,
+        },
+        {
+          label: "Останній бекап",
+          value: backup?.latest_time ? backup.latest_time.split(" ")[0] : "—",
+          sub:   backup?.latest_time
+            ? `${backup.latest_time.split(" ")[1] ?? ""} · ${backup.latest_size_mb != null ? backup.latest_size_mb + " MB" : ""}`
+            : "",
+          color: bkColor,
+        },
+      ];
+
+      const sW = (CW - 9) / 4;
+      statItems.forEach((s, i) => {
+        const sx = M + i * (sW + 3);
+        card(sx, y, sW, STATS_H);
+        // top accent strip
+        ctx.beginPath();
+        ctx.roundRect(sx, y, sW, 4, [R, R, 0, 0]);
+        ctx.fillStyle = s.color;
+        ctx.fill();
+
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "bold 20px Arial";
+        ctx.fillText(s.value, sx + 12, y + 42);
+
+        ctx.fillStyle = "#475569";
+        ctx.font = "10.5px Arial";
+        ctx.fillText(s.label, sx + 12, y + 58);
+
+        if (s.sub) {
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "8.5px Arial";
+          const subMax = Math.floor(sW / 6);
+          ctx.fillText(
+            s.sub.length > subMax ? s.sub.slice(0, subMax - 1) + "…" : s.sub,
+            sx + 12, y + 72
+          );
+        }
+      });
+      y += STATS_H + GAP;
+
+      // ── 3. CPU / RAM Chart ─────────────────────────────────────────────────
+      card(M, y, CW, CHART_H);
 
       ctx.fillStyle = "#0f172a";
-      ctx.font = "bold 12px Arial";
-      ctx.fillText("CPU та RAM (%)", M + 12, y + 20);
+      ctx.font = "bold 11px Arial";
+      ctx.fillText("CPU та RAM (%)", M + 14, y + 20);
 
-      // legend
-      const leg = [
-        { color: "#22d3ee", label: "CPU" },
+      [
+        { color: "#06b6d4", label: "CPU" },
         { color: "#f97316", label: "RAM" },
-      ];
-      leg.forEach((l, i) => {
-        const lx = M + CW - 120 + i * 58;
-        ctx.fillStyle = l.color; ctx.fillRect(lx, y + 13, 16, 3);
-        ctx.fillStyle = "#334155"; ctx.font = "10px Arial";
+      ].forEach((l, i) => {
+        const lx = M + CW - 108 + i * 52;
+        ctx.fillStyle = l.color;
+        ctx.fillRect(lx, y + 14, 16, 3);
+        ctx.fillStyle = "#64748b";
+        ctx.font = "9px Arial";
         ctx.fillText(l.label, lx + 20, y + 18);
       });
 
-      // chart area
-      const CAX = M + 46, CAY = y + 32, CAW = CW - 58, CAH = 182;
+      const CAX = M + 44, CAY = y + 34, CAW = CW - 56, CAH = 194;
 
-      // gridlines
+      // clip to chart area to prevent area overflow
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(CAX, CAY, CAW, CAH);
+      ctx.clip();
+      drawAreaLine("ram", "#f97316", "rgba(249,115,22,0.22)", CAX, CAY, CAW, CAH);
+      drawAreaLine("cpu", "#06b6d4", "rgba(6,182,212,0.22)",  CAX, CAY, CAW, CAH);
+      ctx.restore();
+
+      // gridlines + Y labels
       ctx.textAlign = "right";
       [0, 25, 50, 75, 100].forEach(pct => {
         const gy = CAY + CAH - (pct / 100) * CAH;
-        ctx.strokeStyle = pct === 0 ? "#cbd5e1" : "#e2e8f0";
-        ctx.lineWidth = pct === 0 ? 1 : 0.5;
+        ctx.strokeStyle = pct === 0 ? "#cbd5e1" : "#f1f5f9";
+        ctx.lineWidth = pct === 0 ? 0.8 : 0.5;
         ctx.beginPath(); ctx.moveTo(CAX, gy); ctx.lineTo(CAX + CAW, gy); ctx.stroke();
-        ctx.fillStyle = "#94a3b8"; ctx.font = "9px Arial";
-        ctx.fillText(`${pct}%`, CAX - 5, gy + 3);
+        ctx.fillStyle = "#94a3b8"; ctx.font = "8px Arial";
+        ctx.fillText(`${pct}%`, CAX - 4, gy + 3);
       });
       ctx.textAlign = "left";
 
       // X labels
       if (pts.length > 1) {
-        const ticks = Math.min(8, pts.length);
-        const tStep = Math.floor((pts.length - 1) / (ticks - 1)) || 1;
+        const ticks = Math.min(7, pts.length);
+        const tStep = Math.max(1, Math.floor((pts.length - 1) / (ticks - 1)));
         ctx.fillStyle = "#94a3b8"; ctx.font = "8px Arial"; ctx.textAlign = "center";
         for (let i = 0; i < pts.length; i += tStep) {
           const d = new Date(pts[i].time.endsWith("Z") ? pts[i].time : pts[i].time + "Z");
           const px = CAX + (i / (pts.length - 1)) * CAW;
           ctx.fillText(
             d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: TZ }),
-            px, CAY + CAH + 13
+            px, CAY + CAH + 14
           );
         }
         ctx.textAlign = "left";
       }
+      y += CHART_H + GAP;
 
-      // lines
-      const drawLine = (key: "cpu" | "ram", color: string) => {
-        if (pts.length < 2) return;
-        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+      // ── 4. SLA card ─────────────────────────────────────────────────────────
+      if (slaData) {
+        card(M, y, CW, SLA_H);
+        // left accent bar
         ctx.beginPath();
-        let started = false;
-        pts.forEach((p, i) => {
-          const v = p[key]; if (v == null) return;
-          const px = CAX + (i / (pts.length - 1)) * CAW;
-          const py = CAY + CAH - (v / 100) * CAH;
-          if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
-        });
-        ctx.stroke();
-      };
-      drawLine("ram", "#f97316");
-      drawLine("cpu", "#22d3ee");
+        ctx.roundRect(M, y, 4, SLA_H, [R, 0, 0, R]);
+        ctx.fillStyle = slaColor;
+        ctx.fill();
 
-      y += CHART_H;
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "bold 11px Arial";
+        ctx.fillText("SLA поточного місяця", M + 16, y + 18);
 
-      // ── 5. Disks ────────────────────────────────────────────────────────────
+        ctx.fillStyle = slaColor;
+        ctx.font = "bold 26px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(`${slaData.uptime_pct}%`, M + CW - 14, y + 34);
+        ctx.textAlign = "left";
+
+        ctx.fillStyle = "#64748b";
+        ctx.font = "10px Arial";
+        const dtStr = slaData.downtime_min > 0 ? fmtDowntime(slaData.downtime_min) : "0";
+        ctx.fillText(
+          `Простій: ${dtStr}  ·  Інциденти: ${slaData.incidents.length}`,
+          M + 16, y + 34
+        );
+
+        // Progress bar
+        const bx = M + 16, bw = CW - 32;
+        ctx.beginPath(); ctx.roundRect(bx, y + 46, bw, 7, 3.5);
+        ctx.fillStyle = "#e2e8f0"; ctx.fill();
+        ctx.beginPath(); ctx.roundRect(bx, y + 46, bw * (slaData.uptime_pct / 100), 7, 3.5);
+        ctx.fillStyle = slaColor; ctx.fill();
+
+        if (slaData.incidents.length > 0) {
+          ctx.fillStyle = "#94a3b8"; ctx.font = "8.5px Arial";
+          const incParts = slaData.incidents.slice(0, 3).map(inc =>
+            `${fmtDateTime(inc.from)} (${fmtDowntime(inc.duration_min)})`
+          ).join("  ·  ");
+          ctx.fillText(incParts, M + 16, y + 68);
+        }
+        y += SLA_H + GAP;
+      }
+
+      // ── 5. Disks ─────────────────────────────────────────────────────────────
       if (disks.length > 0) {
-        y += 14;
-        ctx.fillStyle = "#0f172a"; ctx.font = "bold 12px Arial";
-        ctx.fillText("Диски", M, y + 12);
-        y += 20;
+        card(M, y, CW, DISK_H);
+        secLabel("Стан дисків", M + 14, y + 18);
+        let dy = y + 26;
         disks.slice(0, 6).forEach((d: any) => {
           const freePct: number = d.free_pct ?? 0;
-          const barX = M + 90, barW = CW - 160;
-          ctx.fillStyle = "#e2e8f0";
-          ctx.fillRect(barX, y + 5, barW, 10);
-          const barColor = freePct < 5 ? "#ef4444" : freePct < 10 ? "#f59e0b" : "#22c55e";
-          ctx.fillStyle = barColor;
-          ctx.fillRect(barX, y + 5, barW * ((100 - freePct) / 100), 10);
+          const barColor = freePct < 5 ? "#dc2626" : freePct < 10 ? "#f59e0b" : "#16a34a";
+          const barX = M + 108, barW = CW - 150;
+
           ctx.fillStyle = "#334155"; ctx.font = "10px Arial";
-          ctx.fillText(d.path, M, y + 14);
-          ctx.textAlign = "right";
+          ctx.fillText(d.path ?? "?", M + 14, dy + 13);
+
+          ctx.beginPath(); ctx.roundRect(barX, dy + 5, barW, 9, 4.5);
+          ctx.fillStyle = "#e2e8f0"; ctx.fill();
+          ctx.beginPath(); ctx.roundRect(barX, dy + 5, Math.max(4, barW * ((100 - freePct) / 100)), 9, 4.5);
+          ctx.fillStyle = barColor; ctx.fill();
+
+          ctx.fillStyle = "#64748b"; ctx.font = "9px Arial"; ctx.textAlign = "right";
           ctx.fillText(
-            `${freePct}% вільно · ${d.free_gb ?? "—"}/${d.total_gb ?? "—"} GB`,
-            M + CW, y + 14
+            `${freePct}% вільно  ·  ${d.free_gb ?? "—"}/${d.total_gb ?? "—"} GB`,
+            M + CW - 8, dy + 13
           );
           ctx.textAlign = "left";
-          y += 24;
+
+          // ETA hint
+          const fc = diskForecasts?.find(f => f.path_key === d.path);
+          if (fc?.eta_str) {
+            ctx.fillStyle = "#d97706"; ctx.font = "8px Arial";
+            ctx.fillText(`⏳ ${fc.eta_str}`, barX, dy + 25);
+            dy += 32;
+          } else {
+            dy += 32;
+          }
         });
+        y += DISK_H + GAP;
       }
 
-      // ── 6. Alerts ───────────────────────────────────────────────────────────
-      if (alertRows.length > 0) {
-        y += 14;
-        ctx.fillStyle = "#0f172a"; ctx.font = "bold 12px Arial";
-        ctx.fillText("Останні алерти", M, y + 12);
-        y += 20;
-
-        ctx.fillStyle = "#1e40af"; ctx.fillRect(M, y, CW, 24);
-        ctx.fillStyle = "#ffffff"; ctx.font = "bold 10px Arial";
-        ctx.fillText("Час",          M + 8,   y + 16);
-        ctx.fillText("Рівень",       M + 158,  y + 16);
-        ctx.fillText("Повідомлення", M + 258,  y + 16);
-        y += 24;
-
-        alertRows.forEach((row, i) => {
+      // ── 6. Backup history ──────────────────────────────────────────────────
+      if (backupRows.length > 0) {
+        card(M, y, CW, BACKUP_H);
+        secLabel(
+          backupLabelInPeriod
+            ? `Резервні копії за звітний період (${backupRows.length})`
+            : `Останні резервні копії (${backupRows.length})`,
+          M + 14, y + 18
+        );
+        let by = y + 26;
+        backupRows.forEach((f, i) => {
           ctx.fillStyle = i % 2 === 0 ? "#f8fafc" : "#ffffff";
-          ctx.fillRect(M, y, CW, 22);
-          ctx.fillStyle = "#334155"; ctx.font = "9px Arial";
-          ctx.fillText(row.time, M + 8, y + 15);
-          const sevColor = row.sev === "critical" ? "#dc2626" : row.sev === "warning" ? "#d97706" : "#2563eb";
-          ctx.fillStyle = sevColor; ctx.font = "bold 9px Arial";
-          ctx.fillText(row.sev, M + 158, y + 15);
-          ctx.fillStyle = "#334155"; ctx.font = "9px Arial";
-          const maxCh = 88;
-          const msg = row.msg.length > maxCh ? row.msg.slice(0, maxCh - 3) + "…" : row.msg;
-          ctx.fillText(msg, M + 258, y + 15);
-          y += 22;
+          ctx.fillRect(M + 8, by, CW - 16, 20);
+
+          ctx.fillStyle = "#94a3b8"; ctx.font = "9px Arial";
+          ctx.fillText(f.time, M + 14, by + 14);
+
+          ctx.fillStyle = "#334155"; ctx.font = "9.5px Arial";
+          const nameMax = 52;
+          const fname = f.name.length > nameMax ? "…" + f.name.slice(-(nameMax - 1)) : f.name;
+          ctx.fillText(fname, M + 138, by + 14);
+
+          ctx.fillStyle = "#64748b"; ctx.font = "9px Arial"; ctx.textAlign = "right";
+          ctx.fillText(`${f.size_mb} MB`, M + CW - 12, by + 14);
+          ctx.textAlign = "left";
+          by += 22;
         });
+        y += BACKUP_H + GAP;
       }
 
-      // ── Build PDF (split tall canvas across A4 pages) ──────────────────────
-      const { default: jsPDF } = await import("jspdf");
-      const doc = new jsPDF({ format: "a4", unit: "mm" });
+      // ── 7. Alerts ─────────────────────────────────────────────────────────
+      if (alertRows.length > 0) {
+        card(M, y, CW, ALERT_H);
+        secLabel(`Останні алерти (${alertRows.length})`, M + 14, y + 18);
+        let ay = y + 26;
+        alertRows.forEach((a, i) => {
+          ctx.fillStyle = i % 2 === 0 ? "#f8fafc" : "#ffffff";
+          ctx.fillRect(M + 8, ay, CW - 16, 20);
 
-      const PDF_W = 210;   // mm
-      const PDF_H = 297;   // mm
-      const imgH  = (TOTAL_H / PW) * PDF_W; // proportional mm height
+          const sevC = a.severity === "critical" ? "#dc2626"
+                     : a.severity === "warning"  ? "#d97706" : "#2563eb";
+          ctx.fillStyle = "#94a3b8"; ctx.font = "9px Arial";
+          ctx.fillText(fmtDateTime(a.sent_at), M + 14, ay + 14);
+
+          ctx.fillStyle = sevC; ctx.font = "bold 8.5px Arial";
+          ctx.fillText(a.severity.toUpperCase(), M + 138, ay + 14);
+
+          ctx.fillStyle = "#334155"; ctx.font = "9px Arial";
+          const maxMsg = 90;
+          const msg = a.message.length > maxMsg ? a.message.slice(0, maxMsg - 3) + "…" : a.message;
+          ctx.fillText(msg, M + 210, ay + 14);
+          ay += 22;
+        });
+        y += ALERT_H + GAP;
+      }
+
+      // ── 8. Footer ─────────────────────────────────────────────────────────
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "8.5px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        `${serverName}  ·  ${from} — ${to}  ·  SX Monitor  ·  ${new Date().toLocaleDateString("uk-UA", { timeZone: TZ })}`,
+        PW / 2, y + 22
+      );
+      ctx.textAlign = "left";
+
+      // ── Build PDF ──────────────────────────────────────────────────────────
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ format: "a4", unit: "mm", orientation: "portrait" });
+
+      const PDF_W = 210;
+      const PDF_H = 297;
+      const imgH  = (TOTAL_H / PW) * PDF_W;
 
       if (imgH <= PDF_H) {
-        doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, PDF_W, imgH);
+        doc.addImage(canvas, "PNG", 0, 0, PDF_W, imgH);
       } else {
         const pxPerPage = Math.round((PDF_H / PDF_W) * PW * SCALE);
         let srcY = 0, page = 0;
@@ -552,10 +747,14 @@ function ExportSection({
           if (page > 0) doc.addPage();
           const chunkPx = Math.min(pxPerPage, canvas.height - srcY);
           const slice = document.createElement("canvas");
-          slice.width = canvas.width; slice.height = chunkPx;
-          slice.getContext("2d")!.drawImage(canvas, 0, srcY, canvas.width, chunkPx, 0, 0, canvas.width, chunkPx);
-          const sliceMM = (chunkPx / canvas.height) * imgH;
-          doc.addImage(slice.toDataURL("image/png"), "PNG", 0, 0, PDF_W, sliceMM);
+          slice.width  = canvas.width;
+          slice.height = chunkPx;
+          slice.getContext("2d")!.drawImage(
+            canvas, 0, srcY, canvas.width, chunkPx,
+                    0, 0,    slice.width,  chunkPx
+          );
+          const sliceMM = (chunkPx / (TOTAL_H * SCALE)) * imgH;
+          doc.addImage(slice, "PNG", 0, 0, PDF_W, sliceMM);
           srcY += pxPerPage; page++;
         }
       }
@@ -563,7 +762,7 @@ function ExportSection({
       doc.save(`${serverName}_${from}_${to}.pdf`);
     } catch (e) {
       console.error("PDF export error:", e);
-      alert("Помилка при генерації PDF");
+      alert(`Помилка при генерації PDF: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -1209,6 +1408,8 @@ export function ServerDetail() {
           recentAlerts={data.recent_alerts}
           disks={disks}
           slaData={slaData}
+          backup={backup}
+          diskForecasts={diskForecasts}
         />
       </main>
     </div>
