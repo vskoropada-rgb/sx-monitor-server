@@ -88,6 +88,32 @@
    SameSite=Lax — низький пріоритет).
 6. TrustedHostMiddleware у main.py.
 
+## Фічі моніторингу (червень 2026, коміт `b4c4a1d`)
+
+Бекенд + доставка в Telegram готові; UI дашборду для них поки немає (опційний
+наступний крок).
+
+1. **Heartbeat-алерт «агент мовчить»** — `api/heartbeat.py`. Бот у `run()`-циклі
+   раз на 60с (через `time.time()`, не блокує getUpdates) перевіряє `last_seen`.
+   Якщо мовчить >5хв (`OFFLINE_AFTER_MIN`) → critical-алерт у топік сервера;
+   при поверненні → recovery-алерт з тривалістю простою. Поважає
+   `maintenance_until`. Стан у таблиці `server_heartbeats`.
+2. **Прогноз заповнення дисків (ETA)** — `api/disk_forecast.py`. Лінійна регресія
+   (МНК, лише stdlib) по `disk_free_*` за 48г. Показується в щоденному звіті
+   («заповниться через ~3 дні» / «стабільно»). Endpoint
+   `GET /api/dashboard/servers/{id}/disk-forecast`.
+3. **SLA / uptime** — `api/sla.py`. Кожен перехід online↔offline пише
+   `UptimeEvent`; `compute_sla()`/`compute_monthly_sla()` рахують % аптайму та
+   список інцидентів. Endpoints `/api/dashboard/servers/{id}/sla?year&month` і
+   `/api/dashboard/sla/summary`. Щотижневий SLA-звіт надсилається ботом у
+   понеділок о 10:00 (локальний час = UTC+`report_utc_offset`).
+
+Нові таблиці (`server_heartbeats`, `uptime_events`) створюються автоматично в
+`init_db()`. Зміна `notifier.send_daily_report` зворотно-сумісна (`forecasts=None`).
+
+Відкладений EC2-self-monitor (парсинг nginx-логів / DDoS / SSH-брутфорс) —
+на паузі за рішенням користувача.
+
 ## Деплой-нотатки
 
 - Перед деплоєм у `.env` на EC2 мають бути: `SECRET_KEY` (обов'язково),
