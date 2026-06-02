@@ -194,17 +194,16 @@ def collect(config: dict) -> dict:
             else:
                 latest_integrity = stored or "ok"
 
-    # Останні файли за 48г для UI
+    # Всі файли для UI (сортування від нового до старого, ліміт 30)
     recent_files = []
     for f in all_files:
         mtime = datetime.fromtimestamp(os.path.getmtime(f))
-        if now - mtime < timedelta(hours=48):
-            recent_files.append({
-                "name":      os.path.basename(f),
-                "size_mb":   round(os.path.getsize(f) / 1e6, 2),
-                "age_hours": round((now - mtime).total_seconds() / 3600, 1),
-                "time":      mtime.strftime("%Y-%m-%d %H:%M"),
-            })
+        recent_files.append({
+            "name":      os.path.basename(f),
+            "size_mb":   round(os.path.getsize(f) / 1e6, 2),
+            "age_hours": round((now - mtime).total_seconds() / 3600, 1),
+            "time":      mtime.strftime("%Y-%m-%d %H:%M"),
+        })
     recent_files.sort(key=lambda x: x["age_hours"])
 
     # Чи є свіжий бекап з поточного вікна?
@@ -253,7 +252,7 @@ def collect(config: dict) -> dict:
         "latest_age_hours":  age_hours,
         "latest_time":       latest_mtime.strftime("%Y-%m-%d %H:%M"),
         "latest_integrity":  latest_integrity,
-        "recent_files":      recent_files[:5],
+        "recent_files":      recent_files[:30],
         "total_files":       len(all_files),
         "backup_path":       backup_path,
         "schedule_info":     schedule_info,

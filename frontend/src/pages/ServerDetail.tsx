@@ -359,7 +359,19 @@ export function ServerDetail() {
   const uptime: string | null = m.uptime ?? null;
   const disks: any[] = m.disks ?? [];
   const services: any[] = m.services ?? [];
-  const backup = m.backup ?? {};
+  // backup fields are at root level of metrics (merged from backup.collect())
+  const backup = {
+    status:          m.status          ?? m.backup?.status,
+    latest_file:     m.latest_file     ?? m.backup?.file,
+    latest_size_mb:  m.latest_size_mb  ?? m.backup?.size_mb,
+    latest_age_hours:m.latest_age_hours?? m.backup?.age_hours,
+    latest_time:     m.latest_time     ?? null,
+    latest_integrity:m.latest_integrity?? null,
+    issues:          m.issues          ?? m.backup?.issues ?? [],
+    recent_files:    m.recent_files    ?? [],
+    total_files:     m.total_files     ?? null,
+    backup_path:     m.backup_path     ?? null,
+  };
   const backupIssues: string[] = backup.issues ?? [];
   const activeSessions: any[] = m.active_sessions ?? [];
 
@@ -539,39 +551,59 @@ export function ServerDetail() {
           <CardBody className="space-y-3">
             {backup.status ? (
               <>
+                {/* Статус + останній файл */}
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge tone={backupTone}>{backup.status}</Badge>
-                  {backup.latest_file && (
-                    <span className="font-mono text-xs text-muted truncate max-w-xs">
-                      {backup.latest_file}
-                    </span>
+                  {backup.total_files != null && (
+                    <span className="text-xs text-muted">Всього: {backup.total_files} файл(ів)</span>
                   )}
-                  {backup.latest_age_hours != null && (
-                    <span className="text-xs text-muted">
-                      Вік: {backup.latest_age_hours}г
-                    </span>
-                  )}
-                  {backup.latest_size_mb != null && (
-                    <span className="text-xs text-muted">
-                      Розмір: {backup.latest_size_mb} MB
-                    </span>
+                  {backup.backup_path && (
+                    <span className="font-mono text-xs text-muted truncate max-w-xs">{backup.backup_path}</span>
                   )}
                 </div>
-                {backup.latest_time && (
-                  <p className="text-xs text-muted">
-                    Останній:&nbsp;
-                    <span className="text-text font-mono">{backup.latest_time}</span>
-                  </p>
-                )}
+
                 {backupIssues.length > 0 && (
                   <ul className="space-y-1">
                     {backupIssues.map((issue: string, i: number) => (
                       <li key={i} className="flex items-start gap-1.5 text-xs text-warn">
-                        <span className="mt-0.5">•</span>
-                        {issue}
+                        <span className="mt-0.5">•</span>{issue}
                       </li>
                     ))}
                   </ul>
+                )}
+
+                {/* Список файлів */}
+                {backup.recent_files.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-muted border-b border-border">
+                          <th className="text-left pb-1.5 font-medium">Файл</th>
+                          <th className="text-right pb-1.5 font-medium w-20">Розмір</th>
+                          <th className="text-right pb-1.5 font-medium w-36">Час</th>
+                          <th className="text-right pb-1.5 font-medium w-20">Вік</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {backup.recent_files.map((f: any, i: number) => (
+                          <tr key={i} className={i === 0 ? "text-text" : "text-muted"}>
+                            <td className="py-1.5 pr-2 font-mono truncate max-w-[200px]">{f.name}</td>
+                            <td className="py-1.5 text-right">{f.size_mb} MB</td>
+                            <td className="py-1.5 text-right font-mono">{f.time}</td>
+                            <td className="py-1.5 text-right">{f.age_hours}г</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  backup.latest_file && (
+                    <p className="text-xs text-muted">
+                      Останній: <span className="text-text font-mono">{backup.latest_file}</span>
+                      {backup.latest_time && <> — {backup.latest_time}</>}
+                      {backup.latest_size_mb != null && <> ({backup.latest_size_mb} MB)</>}
+                    </p>
+                  )
                 )}
               </>
             ) : (
