@@ -268,10 +268,14 @@ function ExportSection({
   serverId,
   serverName,
   recentAlerts,
+  disks,
+  slaData,
 }: {
   serverId: string;
   serverName: string;
   recentAlerts: Array<{ severity: string; message: string; sent_at: string | null }>;
+  disks: any[];
+  slaData?: SlaResult;
 }) {
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
@@ -281,58 +285,280 @@ function ExportSection({
     setLoading(true);
     try {
       const startISO = new Date(from + "T00:00:00+03:00").toISOString();
-      const endISO = new Date(to + "T23:59:59+03:00").toISOString();
-      const history = await api.serverHistoryRange(serverId, startISO, endISO);
+      const endISO   = new Date(to   + "T23:59:59+03:00").toISOString();
+      const history  = await api.serverHistoryRange(serverId, startISO, endISO);
 
+      // Sample down to ≤200 points for the chart
+      const MAX_PTS = 200;
+      const step = Math.max(1, Math.ceil(history.length / MAX_PTS));
+      const pts = history.filter((_, i) => i % step === 0);
+
+      // Summary stats
+      const cpuVals = pts.filter(p => p.cpu != null).map(p => p.cpu!);
+      const ramVals = pts.filter(p => p.ram != null).map(p => p.ram!);
+      const avg = (a: number[]) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+      const avgCpu = avg(cpuVals);
+      const maxCpu = cpuVals.length ? Math.max(...cpuVals) : null;
+      const avgRam = avg(ramVals);
+      const maxRam = ramVals.length ? Math.max(...ramVals) : null;
+
+      const alertRows = recentAlerts.slice(0, 15).map(a => ({
+        time: fmtDateTime(a.sent_at),
+        sev:  a.severity,
+        msg:  a.message,
+      }));
+
+      // ── Canvas layout constants ────────────────────────────────────────────
+      const SCALE  = 2;     // retina quality
+      const PW     = 794;   // logical px (A4 @ 96dpi)
+      const M      = 24;    // margin
+      const CW     = PW - M * 2;
+
+      const HEADER_H = 82;
+      const STATS_H  = 80;
+      const SLA_H    = slaData ? 60 : 0;
+      const CHART_H  = 256;
+      const DISK_H   = disks.length > 0 ? 28 + Math.min(disks.length, 6) * 24 : 0;
+      const ALERT_H  = alertRows.length > 0 ? 40 + alertRows.length * 22 : 0;
+      const TOTAL_H  = M + HEADER_H + 14 + STATS_H
+                     + (SLA_H  ? 12 + SLA_H  : 0)
+                     + 12 + CHART_H
+                     + (DISK_H  ? 14 + DISK_H  : 0)
+                     + (ALERT_H ? 14 + ALERT_H : 0)
+                     + M;
+
+      const canvas = document.createElement("canvas");
+      canvas.width  = PW    * SCALE;
+      canvas.height = TOTAL_H * SCALE;
+      const ctx = canvas.getContext("2d")!;
+      ctx.scale(SCALE, SCALE);
+
+      // White background
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, PW, TOTAL_H);
+
+      let y = M;
+
+      // ── 1. Header ───────────────────────────────────────────────────────────
+      ctx.fillStyle = "#1e3a8a";
+      ctx.fillRect(M, y, CW, HEADER_H);
+      // top shimmer
+      ctx.fillStyle = "rgba(255,255,255,0.07)";
+      ctx.fillRect(M, y, CW, 5);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 20px Arial";
+      ctx.fillText(`Звіт: ${serverName}`, M + 16, y + 32);
+      ctx.fillStyle = "rgba(255,255,255,0.72)";
+      ctx.font = "11px Arial";
+      ctx.fillText(`Період: ${from} — ${to}`, M + 16, y + 52);
+      ctx.fillText(
+        `Сформовано: ${new Date().toLocaleString("uk-UA", { timeZone: TZ })}`,
+        M + 16, y + 68
+      );
+      y += HEADER_H + 14;
+
+      // ── 2. Stats row ────────────────────────────────────────────────────────
+      const statItems = [
+        { label: "Середній CPU", value: avgCpu != null ? `${avgCpu.toFixed(1)}%` : "—", accent: "#22d3ee" },
+        { label: "Пік CPU",      value: maxCpu != null ? `${maxCpu.toFixed(1)}%` : "—", accent: "#ef4444" },
+        { label: "Середній RAM", value: avgRam != null ? `${avgRam.toFixed(1)}%` : "—", accent: "#22d3ee" },
+        { label: "Пік RAM",      value: maxRam != null ? `${maxRam.toFixed(1)}%` : "—", accent: "#f97316" },
+      ];
+      const sW = (CW - 12) / 4;
+      statItems.forEach((s, i) => {
+        const sx = M + i * (sW + 4);
+        ctx.fillStyle = "#f1f5f9";
+        ctx.fillRect(sx, y, sW, 68);
+        ctx.fillStyle = s.accent;
+        ctx.fillRect(sx, y, 4, 68);
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "bold 22px Arial";
+        ctx.fillText(s.value, sx + 14, y + 38);
+        ctx.fillStyle = "#64748b";
+        ctx.font = "11px Arial";
+        ctx.fillText(s.label, sx + 14, y + 56);
+      });
+      y += STATS_H;
+
+      // ── 3. SLA ──────────────────────────────────────────────────────────────
+      if (slaData) {
+        y += 12;
+        ctx.fillStyle = "#f1f5f9";
+        ctx.fillRect(M, y, CW, SLA_H);
+        const slaColor = slaData.uptime_pct >= 99.9 ? "#16a34a"
+                       : slaData.uptime_pct >= 99.0 ? "#d97706" : "#dc2626";
+        ctx.fillStyle = slaColor;
+        ctx.fillRect(M, y, 4, SLA_H);
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "bold 13px Arial";
+        ctx.fillText("SLA поточного місяця", M + 14, y + 22);
+        ctx.fillStyle = slaColor;
+        ctx.font = "bold 20px Arial";
+        const slaStr = `${slaData.uptime_pct}%`;
+        const slaX = M + CW - ctx.measureText(slaStr).width - 14;
+        ctx.fillText(slaStr, slaX, y + 26);
+        ctx.fillStyle = "#64748b";
+        ctx.font = "11px Arial";
+        const dt = slaData.downtime_min > 0 ? fmtDowntime(slaData.downtime_min) : "0";
+        ctx.fillText(
+          `Простій: ${dt} · Інциденти: ${slaData.incidents.length}`,
+          M + 14, y + 44
+        );
+        y += SLA_H;
+      }
+
+      // ── 4. Chart ────────────────────────────────────────────────────────────
+      y += 12;
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(M, y, CW, CHART_H);
+
+      ctx.fillStyle = "#0f172a";
+      ctx.font = "bold 12px Arial";
+      ctx.fillText("CPU та RAM (%)", M + 12, y + 20);
+
+      // legend
+      const leg = [
+        { color: "#22d3ee", label: "CPU" },
+        { color: "#f97316", label: "RAM" },
+      ];
+      leg.forEach((l, i) => {
+        const lx = M + CW - 120 + i * 58;
+        ctx.fillStyle = l.color; ctx.fillRect(lx, y + 13, 16, 3);
+        ctx.fillStyle = "#334155"; ctx.font = "10px Arial";
+        ctx.fillText(l.label, lx + 20, y + 18);
+      });
+
+      // chart area
+      const CAX = M + 46, CAY = y + 32, CAW = CW - 58, CAH = 182;
+
+      // gridlines
+      ctx.textAlign = "right";
+      [0, 25, 50, 75, 100].forEach(pct => {
+        const gy = CAY + CAH - (pct / 100) * CAH;
+        ctx.strokeStyle = pct === 0 ? "#cbd5e1" : "#e2e8f0";
+        ctx.lineWidth = pct === 0 ? 1 : 0.5;
+        ctx.beginPath(); ctx.moveTo(CAX, gy); ctx.lineTo(CAX + CAW, gy); ctx.stroke();
+        ctx.fillStyle = "#94a3b8"; ctx.font = "9px Arial";
+        ctx.fillText(`${pct}%`, CAX - 5, gy + 3);
+      });
+      ctx.textAlign = "left";
+
+      // X labels
+      if (pts.length > 1) {
+        const ticks = Math.min(8, pts.length);
+        const tStep = Math.floor((pts.length - 1) / (ticks - 1)) || 1;
+        ctx.fillStyle = "#94a3b8"; ctx.font = "8px Arial"; ctx.textAlign = "center";
+        for (let i = 0; i < pts.length; i += tStep) {
+          const d = new Date(pts[i].time.endsWith("Z") ? pts[i].time : pts[i].time + "Z");
+          const px = CAX + (i / (pts.length - 1)) * CAW;
+          ctx.fillText(
+            d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: TZ }),
+            px, CAY + CAH + 13
+          );
+        }
+        ctx.textAlign = "left";
+      }
+
+      // lines
+      const drawLine = (key: "cpu" | "ram", color: string) => {
+        if (pts.length < 2) return;
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+        ctx.beginPath();
+        let started = false;
+        pts.forEach((p, i) => {
+          const v = p[key]; if (v == null) return;
+          const px = CAX + (i / (pts.length - 1)) * CAW;
+          const py = CAY + CAH - (v / 100) * CAH;
+          if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+        });
+        ctx.stroke();
+      };
+      drawLine("ram", "#f97316");
+      drawLine("cpu", "#22d3ee");
+
+      y += CHART_H;
+
+      // ── 5. Disks ────────────────────────────────────────────────────────────
+      if (disks.length > 0) {
+        y += 14;
+        ctx.fillStyle = "#0f172a"; ctx.font = "bold 12px Arial";
+        ctx.fillText("Диски", M, y + 12);
+        y += 20;
+        disks.slice(0, 6).forEach((d: any) => {
+          const freePct: number = d.free_pct ?? 0;
+          const barX = M + 90, barW = CW - 160;
+          ctx.fillStyle = "#e2e8f0";
+          ctx.fillRect(barX, y + 5, barW, 10);
+          const barColor = freePct < 5 ? "#ef4444" : freePct < 10 ? "#f59e0b" : "#22c55e";
+          ctx.fillStyle = barColor;
+          ctx.fillRect(barX, y + 5, barW * ((100 - freePct) / 100), 10);
+          ctx.fillStyle = "#334155"; ctx.font = "10px Arial";
+          ctx.fillText(d.path, M, y + 14);
+          ctx.textAlign = "right";
+          ctx.fillText(
+            `${freePct}% вільно · ${d.free_gb ?? "—"}/${d.total_gb ?? "—"} GB`,
+            M + CW, y + 14
+          );
+          ctx.textAlign = "left";
+          y += 24;
+        });
+      }
+
+      // ── 6. Alerts ───────────────────────────────────────────────────────────
+      if (alertRows.length > 0) {
+        y += 14;
+        ctx.fillStyle = "#0f172a"; ctx.font = "bold 12px Arial";
+        ctx.fillText("Останні алерти", M, y + 12);
+        y += 20;
+
+        ctx.fillStyle = "#1e40af"; ctx.fillRect(M, y, CW, 24);
+        ctx.fillStyle = "#ffffff"; ctx.font = "bold 10px Arial";
+        ctx.fillText("Час",          M + 8,   y + 16);
+        ctx.fillText("Рівень",       M + 158,  y + 16);
+        ctx.fillText("Повідомлення", M + 258,  y + 16);
+        y += 24;
+
+        alertRows.forEach((row, i) => {
+          ctx.fillStyle = i % 2 === 0 ? "#f8fafc" : "#ffffff";
+          ctx.fillRect(M, y, CW, 22);
+          ctx.fillStyle = "#334155"; ctx.font = "9px Arial";
+          ctx.fillText(row.time, M + 8, y + 15);
+          const sevColor = row.sev === "critical" ? "#dc2626" : row.sev === "warning" ? "#d97706" : "#2563eb";
+          ctx.fillStyle = sevColor; ctx.font = "bold 9px Arial";
+          ctx.fillText(row.sev, M + 158, y + 15);
+          ctx.fillStyle = "#334155"; ctx.font = "9px Arial";
+          const maxCh = 88;
+          const msg = row.msg.length > maxCh ? row.msg.slice(0, maxCh - 3) + "…" : row.msg;
+          ctx.fillText(msg, M + 258, y + 15);
+          y += 22;
+        });
+      }
+
+      // ── Build PDF (split tall canvas across A4 pages) ──────────────────────
       const { default: jsPDF } = await import("jspdf");
-      const { default: autoTable } = await import("jspdf-autotable");
+      const doc = new jsPDF({ format: "a4", unit: "mm" });
 
-      const doc = new jsPDF();
+      const PDF_W = 210;   // mm
+      const PDF_H = 297;   // mm
+      const imgH  = (TOTAL_H / PW) * PDF_W; // proportional mm height
 
-      doc.setFontSize(16);
-      doc.text(`Звіт: ${serverName}`, 14, 18);
-      doc.setFontSize(10);
-      doc.setTextColor(120);
-      doc.text(`Період: ${from} — ${to}`, 14, 26);
-      doc.text(`Сформовано: ${new Date().toLocaleString("uk-UA", { timeZone: TZ })}`, 14, 32);
-      doc.setTextColor(0);
-
-      doc.setFontSize(12);
-      doc.text("Метрики CPU / RAM", 14, 44);
-
-      const tableRows = history.slice(0, 500).map((p: HistoryPoint) => [
-        new Date(p.time.endsWith("Z") ? p.time : p.time + "Z").toLocaleString("uk-UA", { timeZone: TZ }),
-        p.cpu != null ? `${p.cpu}%` : "—",
-        p.ram != null ? `${p.ram}%` : "—",
-      ]);
-
-      autoTable(doc, {
-        startY: 48,
-        head: [["Час", "CPU", "RAM"]],
-        body: tableRows.length ? tableRows : [["Немає даних", "", ""]],
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [30, 64, 175] },
-      });
-
-      const afterTable = (doc as any).lastAutoTable?.finalY ?? 60;
-
-      doc.setFontSize(12);
-      doc.text("Останні алерти", 14, afterTable + 12);
-
-      const alertRows = recentAlerts.slice(0, 30).map((a) => [
-        fmtDateTime(a.sent_at),
-        a.severity,
-        a.message,
-      ]);
-
-      autoTable(doc, {
-        startY: afterTable + 16,
-        head: [["Час", "Рівень", "Повідомлення"]],
-        body: alertRows.length ? alertRows : [["Алертів немає", "", ""]],
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [30, 64, 175] },
-        columnStyles: { 2: { cellWidth: "auto" } },
-      });
+      if (imgH <= PDF_H) {
+        doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, PDF_W, imgH);
+      } else {
+        const pxPerPage = Math.round((PDF_H / PDF_W) * PW * SCALE);
+        let srcY = 0, page = 0;
+        while (srcY < canvas.height) {
+          if (page > 0) doc.addPage();
+          const chunkPx = Math.min(pxPerPage, canvas.height - srcY);
+          const slice = document.createElement("canvas");
+          slice.width = canvas.width; slice.height = chunkPx;
+          slice.getContext("2d")!.drawImage(canvas, 0, srcY, canvas.width, chunkPx, 0, 0, canvas.width, chunkPx);
+          const sliceMM = (chunkPx / canvas.height) * imgH;
+          doc.addImage(slice.toDataURL("image/png"), "PNG", 0, 0, PDF_W, sliceMM);
+          srcY += pxPerPage; page++;
+        }
+      }
 
       doc.save(`${serverName}_${from}_${to}.pdf`);
     } catch (e) {
@@ -981,6 +1207,8 @@ export function ServerDetail() {
           serverId={data.id}
           serverName={data.name}
           recentAlerts={data.recent_alerts}
+          disks={disks}
+          slaData={slaData}
         />
       </main>
     </div>
