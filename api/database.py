@@ -47,6 +47,18 @@ def init_db():
                 user_agent TEXT,
                 at TIMESTAMP DEFAULT NOW()
             );""",
+            """CREATE TABLE IF NOT EXISTS server_heartbeats (
+                server_id VARCHAR PRIMARY KEY REFERENCES servers(id),
+                online INTEGER DEFAULT 1,
+                changed_at TIMESTAMP DEFAULT NOW()
+            );""",
+            """CREATE TABLE IF NOT EXISTS uptime_events (
+                id SERIAL PRIMARY KEY,
+                server_id VARCHAR NOT NULL REFERENCES servers(id),
+                event VARCHAR NOT NULL,
+                at TIMESTAMP DEFAULT NOW() NOT NULL
+            );""",
+            "CREATE INDEX IF NOT EXISTS idx_uptime_server_at ON uptime_events(server_id, at);",
         ]:
             conn.execute(text(stmt))
         conn.commit()

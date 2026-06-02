@@ -177,6 +177,21 @@ def _get_server_by_callback(data: str) -> tuple[Server | None, str]:
     return None, action
 
 
+def _build_config_map(db: Session) -> dict:
+    """Будує {server_id: config_dict} для всіх серверів."""
+    servers = db.query(Server).all()
+    result = {}
+    for s in servers:
+        result[s.id] = {
+            "SERVER_ID":    s.id,
+            "COMPANY_NAME": s.name,
+            "TG_BOT_TOKEN": settings.tg_bot_token,
+            "TG_GROUP_ID":  settings.tg_group_id,
+            "TG_TOPIC_ID":  s.tg_topic_id or "",
+        }
+    return result
+
+
 def handle_callback(update: dict):
     cb   = update.get("callback_query", {})
     data = cb.get("data", "")
@@ -566,9 +581,15 @@ def handle_message(update: dict):
 
 
 def run():
+    import heartbeat as _hb
+    import notifier
+    import sla as _sla
+
     init_db()
     logger.info("Bot started")
     offset = 0
+    _last_hb_check = 0.0
+    _last_sla_report_day = -1   # порядковий день тижня (0=пн) коли вже надіслали SLA
 
     while True:
         try:
@@ -591,6 +612,47 @@ def run():
                         handle_message(upd)
                 except Exception as e:
                     logger.error("handle update error: %s", e)
+
+            # Heartbeat check — раз на хвилину
+            now_ts = time.time()
+            if now_ts - _last_hb_check >= 60:
+                _last_hb_check = now_ts
+                try:
+                    _hb_db = SessionLocal()
+                    try:
+                        cfg_map = _build_config_map(_hb_db)
+                        _hb.check_heartbeats(_hb_db, cfg_map)
+                    finally:
+                        _hb_db.close()
+                except Exception as e:
+                    logger.error("heartbeat check error: %s", e)
+
+                # Щотижневий SLA-звіт — у понеділок о 10:00 UTC+offset
+                try:
+                    utc_offset = settings.report_utc_offset
+                    local_now = datetime.utcnow() + timedelta(hours=utc_offset)
+                    # weekday()==0 — понеділок, hour==10, не надсилали сьогодні
+                    if (local_now.weekday() == 0
+                            and local_now.hour == 10
+                            and local_now.toordinal() != _last_sla_report_day):
+                        _last_sla_report_day = local_now.toordinal()
+                        _sla_db = SessionLocal()
+                        try:
+                            servers = _sla_db.query(Server).all()
+                            cfg_map = _build_config_map(_sla_db)
+                            # Минулий тиждень: пн..нд
+                            week_end = local_now.replace(
+                                hour=0, minute=0, second=0, microsecond=0
+                            )
+                            week_start = week_end - timedelta(days=7)
+                            notifier.send_sla_report(
+                                _sla_db, cfg_map, servers,
+                                week_start, week_end,
+                            )
+                        finally:
+                            _sla_db.close()
+                except Exception as e:
+                    logger.error("weekly SLA report error: %s", e)
 
         except Exception as e:
             logger.error("polling error: %s", e)

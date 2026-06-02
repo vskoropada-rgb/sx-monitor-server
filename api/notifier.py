@@ -66,7 +66,8 @@ def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
     return _send_message(config, "\n".join(lines), keyboard)
 
 
-def send_daily_report(metrics: dict, config: dict, pending_alerts: list = None) -> bool:
+def send_daily_report(metrics: dict, config: dict, pending_alerts: list = None,
+                      forecasts: list = None) -> bool:
     company = config.get("COMPANY_NAME", config.get("SERVER_ID", "Server"))
     now     = datetime.now()
 
@@ -116,7 +117,55 @@ def send_daily_report(metrics: dict, config: dict, pending_alerts: list = None) 
             if body:
                 lines.append(f"     <i>{body}</i>")
 
+    if forecasts:
+        lines += ["", "🔮 <b>Прогноз дисків:</b>"]
+        for fc in forecasts:
+            path_key = fc.get("path_key", "?")
+            current_pct = fc.get("current_pct", "?")
+            eta_hours = fc.get("eta_hours")
+            eta_str = fc.get("eta_str")
+            if eta_hours is not None and eta_str:
+                lines.append(f"  ⏳ {path_key}: {current_pct}% вільно, заповниться через ~{eta_str}")
+            else:
+                lines.append(f"  ✅ {path_key}: {current_pct}% вільно, стабільно")
+
     return _send_message(config, "\n".join(lines))
+
+
+def send_sla_report(db, config_by_server: dict, servers: list,
+                    week_start: datetime, week_end: datetime) -> None:
+    """Надсилає щотижневий SLA-звіт для кожного сервера у відповідний топік."""
+    import sla as _sla
+    for server in servers:
+        cfg = config_by_server.get(server.id)
+        if not cfg:
+            continue
+        try:
+            result = _sla.compute_sla(db, server.id, week_start, week_end)
+            uptime = result.get("uptime_pct", 100.0)
+            downtime_min = result.get("downtime_min", 0)
+            incidents = result.get("incidents", [])
+
+            icon = "✅" if uptime >= 99.9 else "⚠️" if uptime >= 99.0 else "🔴"
+            lines = [
+                f"📈 <b>SLA звіт — {server.name}</b>",
+                f"📅 {week_start.strftime('%d.%m')} — {week_end.strftime('%d.%m.%Y')}",
+                "",
+                f"{icon} Uptime: <b>{uptime}%</b>",
+                f"⏱ Простій: {downtime_min} хв",
+            ]
+            if incidents:
+                lines += ["", "📋 <b>Інциденти:</b>"]
+                for inc in incidents[:5]:
+                    lines.append(
+                        f"  • {inc['from'][:16]} — {inc['to'][11:16]} "
+                        f"({inc['duration_min']} хв)"
+                    )
+                if len(incidents) > 5:
+                    lines.append(f"  ... ще {len(incidents) - 5} інцидентів")
+            _send_message(cfg, "\n".join(lines))
+        except Exception as e:
+            logger.error("SLA report error for %s: %s", server.id, e)
 
 
 def send_message(text: str, config: dict, keyboard=None) -> bool:

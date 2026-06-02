@@ -284,3 +284,50 @@ def auth_logs(limit: int = 100, db: Session = Depends(get_db)):
         }
         for r in rows
     ]
+
+
+# ─── Feature 2: Disk fill ETA ────────────────────────────────────────────────
+
+@router.get("/servers/{server_id}/disk-forecast")
+def disk_forecast(server_id: str, db: Session = Depends(get_db)):
+    """Прогноз заповнення дисків методом лінійної регресії (48г даних)."""
+    import disk_forecast as _df
+    s = db.query(Server).filter(Server.id == server_id).first()
+    if not s:
+        return {"error": "not found"}
+    return _df.get_all_forecasts(db, server_id)
+
+
+# ─── Feature 3: SLA / uptime ─────────────────────────────────────────────────
+
+@router.get("/servers/{server_id}/sla")
+def server_sla(
+    server_id: str,
+    year: int = Query(default=None),
+    month: int = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """SLA за вказаний місяць (або поточний, якщо не вказано)."""
+    import sla as _sla
+    s = db.query(Server).filter(Server.id == server_id).first()
+    if not s:
+        return {"error": "not found"}
+    now = datetime.utcnow()
+    y = year  if year  else now.year
+    m = month if month else now.month
+    return _sla.compute_monthly_sla(db, server_id, y, m)
+
+
+@router.get("/sla/summary")
+def sla_summary(
+    year: int = Query(default=None),
+    month: int = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """SLA за поточний місяць для всіх серверів."""
+    import sla as _sla
+    now = datetime.utcnow()
+    y = year  if year  else now.year
+    m = month if month else now.month
+    servers = db.query(Server).all()
+    return [_sla.compute_monthly_sla(db, s.id, y, m) for s in servers]

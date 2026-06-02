@@ -146,3 +146,25 @@ class AuthToken(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
     used_at    = Column(DateTime)
+
+
+class ServerHeartbeat(Base):
+    """Поточний статус онлайн/офлайн кожного сервера — для heartbeat-алертів."""
+    __tablename__ = "server_heartbeats"
+
+    server_id  = Column(String, ForeignKey("servers.id"), primary_key=True)
+    online     = Column(Integer, default=1)   # 1=online, 0=offline
+    changed_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UptimeEvent(Base):
+    """Лог переходів онлайн/офлайн для розрахунку SLA."""
+    __tablename__ = "uptime_events"
+    __table_args__ = (
+        Index("idx_uptime_server_at", "server_id", "at"),
+    )
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    server_id = Column(String, ForeignKey("servers.id"), nullable=False)
+    event     = Column(String, nullable=False)   # "offline" | "online"
+    at        = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -150,7 +150,14 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
         if now.hour == int(config["DAILY_REPORT_HOUR"]) and now.minute < 2:
             if storage.can_send_alert(db, server_id, "daily_report", 22 * 60):
                 pending = storage.get_pending_alerts(db, server_id)
-                notifier.send_daily_report(payload, config, pending_alerts=pending)
+                # Disk fill ETA прогноз
+                try:
+                    import disk_forecast as _df
+                    forecasts = _df.get_all_forecasts(db, server_id)
+                except Exception:
+                    forecasts = None
+                notifier.send_daily_report(payload, config, pending_alerts=pending,
+                                           forecasts=forecasts or None)
                 storage.clear_pending_alerts(db, server_id)
                 storage.record_alert(db, server_id, "daily_report", "report", "info", "sent")
 
