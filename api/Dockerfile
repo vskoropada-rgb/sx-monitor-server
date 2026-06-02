@@ -10,4 +10,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Непривілейований користувач рантайму. MPLCONFIGDIR — щоб matplotlib
+# (графіки в боті) міг писати кеш у каталог, доступний appuser.
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /tmp/mpl && chown appuser:appuser /tmp/mpl
+ENV MPLCONFIGDIR=/tmp/mpl
+USER appuser
+
 CMD ["sh", "-c", "if [ \"$RUN_MODE\" = 'bot' ]; then python bot.py; else uvicorn main:app --host 0.0.0.0 --port 8000; fi"]
