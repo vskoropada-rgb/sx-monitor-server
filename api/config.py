@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret"
     alert_cooldown_min: int = 30
     daily_report_hour: int = 10
+    # UTC offset для щоденного звіту. Україна: влітку +3, взимку +2
+    report_utc_offset: int = 3
 
     # Секрет для реєстрації нових агентів (POST /api/servers/register).
     # Окремий від secret_key, щоб не світити майстер-ключ JWT на агентах.

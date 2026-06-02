@@ -1,7 +1,7 @@
 """
 POST /api/metrics  — головний endpoint: агент надсилає дані кожну хвилину.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
@@ -134,6 +134,7 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
             "OPENAI_MODEL":           settings.openai_model,
             "ALERT_COOLDOWN_MIN":     str(settings.alert_cooldown_min),
             "DAILY_REPORT_HOUR":      str(settings.daily_report_hour),
+            "REPORT_UTC_OFFSET":      str(settings.report_utc_offset),
         }
 
         decision = analyzer.analyze(payload, config)
@@ -160,8 +161,9 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
                                  decision.get("tags", [""])[0], severity,
                                  decision.get("title", ""))
 
-        # Щоденний звіт
-        now = datetime.utcnow()
+        # Щоденний звіт (now у локальному часі за REPORT_UTC_OFFSET)
+        utc_offset = int(config.get("REPORT_UTC_OFFSET", 0))
+        now = datetime.utcnow() + timedelta(hours=utc_offset)
         if now.hour == int(config["DAILY_REPORT_HOUR"]) and now.minute < 2:
             if storage.can_send_alert(db, server_id, "daily_report", 22 * 60):
                 pending = storage.get_pending_alerts(db, server_id)
