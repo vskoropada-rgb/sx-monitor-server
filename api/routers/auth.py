@@ -83,7 +83,7 @@ def create_login_token(
     x_internal_secret: str = Header(default=""),
     db: Session = Depends(get_db),
 ):
-    if not _secrets.compare_digest(x_internal_secret, settings.secret_key):
+    if not _secrets.compare_digest(x_internal_secret, settings.effective_internal_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     if body.admin_id not in settings.admin_ids:
         raise HTTPException(status_code=403, detail="Not an admin")

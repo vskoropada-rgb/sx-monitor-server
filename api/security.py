@@ -10,6 +10,7 @@
 
 Без VPN, без паролів. Єдиний ключ — доступ до Telegram-акаунта адміна.
 """
+import hashlib
 import secrets
 from datetime import datetime, timedelta
 
@@ -68,19 +69,25 @@ def require_admin(sx_session: str | None = Cookie(default=None)) -> int:
 
 
 # ─── Одноразові login-токени (magic link) ────────────────────────
+# У БД зберігаємо лише SHA-256 хеш токена: витік таблиці auth_tokens не
+# дасть діючих login-посилань (а raw-значення віддаємо тільки ботові).
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
 
 def issue_login_token(db: Session, admin_id: int) -> str:
     """Викликається ботом. Створює одноразовий токен і повертає raw-значення."""
     raw = secrets.token_urlsafe(32)
     expires = _now() + timedelta(minutes=settings.login_token_ttl_min)
-    db.add(AuthToken(token=raw, admin_id=admin_id, expires_at=expires))
+    db.add(AuthToken(token=_hash_token(raw), admin_id=admin_id, expires_at=expires))
     db.commit()
     return raw
 
 
 def consume_login_token(db: Session, raw: str) -> int:
     """Перевіряє і одразу «спалює» токен. Повертає admin_id або кидає 401."""
-    row = db.query(AuthToken).filter(AuthToken.token == raw).first()
+    row = db.query(AuthToken).filter(AuthToken.token == _hash_token(raw)).first()
     if not row:
         raise HTTPException(status_code=401, detail="Невірне посилання")
 

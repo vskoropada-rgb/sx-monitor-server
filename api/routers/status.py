@@ -6,6 +6,7 @@ import secrets as _secrets
 
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import security
@@ -94,15 +95,21 @@ def all_status(db: Session = Depends(get_db), _: int = Depends(security.require_
     return {s.server_id: s.data for s in snaps}
 
 
+class RegisterPayload(BaseModel):
+    server_id:   str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    api_key:     str = Field(min_length=32, max_length=128)
+    name:        str | None = Field(default=None, max_length=128)
+    tg_topic_id: str | None = Field(default=None, max_length=64)
+
+
 @router.post("/servers/register")
 def register_server(
-    payload: dict,
+    payload: RegisterPayload,
     x_register_secret: str = Header(default=""),
     db: Session = Depends(get_db),
 ):
     """
     Реєстрація нового агента. Захищено REGISTER_SECRET.
-    payload: {server_id, name, api_key, tg_topic_id?}
 
     Якщо tg_topic_id не передано — сервер сам створює Forum Topic у
     Telegram-групі під назвою компанії (бо токен бота лише на сервері).
@@ -113,10 +120,10 @@ def register_server(
         raise HTTPException(status_code=403, detail="Invalid register secret")
 
     from models import Server as ServerModel
-    name = payload.get("name") or payload["server_id"]
+    name = payload.name or payload.server_id
 
     existing = db.query(ServerModel).filter(
-        ServerModel.id == payload["server_id"]
+        ServerModel.id == payload.server_id
     ).first()
 
     if existing:
@@ -131,9 +138,9 @@ def register_server(
     topic_id = _create_forum_topic(name)
 
     server = ServerModel(
-        id=payload["server_id"],
+        id=payload.server_id,
         name=name,
-        api_key=hash_api_key(payload["api_key"]),
+        api_key=hash_api_key(payload.api_key),
         tg_topic_id=topic_id,
     )
     db.add(server)

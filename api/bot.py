@@ -545,7 +545,7 @@ def handle_message(update: dict):
         r = requests.post(
             "http://api:8000/api/auth/login-token",
             json={"admin_id": user_id},
-            headers={"X-Internal-Secret": settings.secret_key},
+            headers={"X-Internal-Secret": settings.effective_internal_secret},
             timeout=5,
         )
         if r.status_code != 200:

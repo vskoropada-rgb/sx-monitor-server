@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # Окремий від secret_key, щоб не світити майстер-ключ JWT на агентах.
     register_secret: str = ""
 
+    # Секрет для внутрішнього виклику бот→API (/api/auth/login-token).
+    # Окремий від secret_key: якщо цей заголовок колись витече, ним не можна
+    # буде підписувати/форджити JWT-сесії. Якщо не заданий — для сумісності
+    # зі старими деплоями використовуємо secret_key (див. effective_internal_secret).
+    internal_secret: str = ""
+
     # ─── Dashboard / Auth ────────────────────────────────────────
     # Публічний URL сервера — для magic-link у Telegram (https://monitor.domain.com)
     public_url: str = "http://localhost"
@@ -41,6 +47,11 @@ class Settings(BaseSettings):
                 "(generate with: python -c \"import secrets; print(secrets.token_hex(32))\")"
             )
         return v
+
+    @property
+    def effective_internal_secret(self) -> str:
+        """internal_secret, або secret_key як fallback для старих деплоїв."""
+        return self.internal_secret or self.secret_key
 
     @property
     def admin_ids(self) -> set[int]:
