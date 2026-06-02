@@ -27,23 +27,6 @@ def collect(config: dict) -> dict:
         except Exception as e:
             logger.debug("winupdate registry read: %s", e)
 
-    # PendingFileRenameOperations — незакінчені апдейти
-    try:
-        key = winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Control\Session Manager"
-        )
-        try:
-            val, _ = winreg.QueryValueEx(key, "PendingFileRenameOperations")
-            if val:
-                reboot_required = True
-                reasons.append("PendingFileRename")
-        except FileNotFoundError:
-            pass
-        winreg.CloseKey(key)
-    except Exception as e:
-        logger.debug("PendingFileRename check: %s", e)
-
     return {
         "reboot_required": reboot_required,
         "reboot_reasons": reasons,
