@@ -3,7 +3,8 @@ import { AlertsPanel } from "@/components/AlertsPanel";
 import { CommandLog } from "@/components/CommandLog";
 import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, LogOut, RefreshCw } from "lucide-react";
+import { Activity, LogOut, RefreshCw, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export function Dashboard() {
   const { data: servers, isLoading, isFetching } = useQuery({
@@ -11,6 +12,14 @@ export function Dashboard() {
     queryFn: api.overview,
     refetchInterval: 10000,
   });
+
+  const { data: slaData } = useQuery({
+    queryKey: ["slaSummary"],
+    queryFn: () => api.slaSummary(),
+    refetchInterval: 120000,
+  });
+
+  const slaMap = Object.fromEntries((slaData ?? []).map((r) => [r.server_id, r]));
 
   const onlineCount = servers?.filter((s) => s.online).length ?? 0;
   const total = servers?.length ?? 0;
@@ -32,6 +41,12 @@ export function Dashboard() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              to="/sla"
+              className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
+            >
+              <TrendingUp className="w-4 h-4" /> SLA
+            </Link>
             <RefreshCw
               className={`w-4 h-4 text-muted ${isFetching ? "animate-spin" : ""}`}
             />
@@ -51,7 +66,7 @@ export function Dashboard() {
         ) : (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {servers?.map((s) => (
-              <ServerCard key={s.id} s={s} />
+              <ServerCard key={s.id} s={s} sla={slaMap[s.id]} />
             ))}
           </section>
         )}

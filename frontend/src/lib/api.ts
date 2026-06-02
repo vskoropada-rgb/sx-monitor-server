@@ -111,6 +111,29 @@ export interface LoginLogEntry {
   at: string | null;
 }
 
+export interface DiskForecast {
+  path_key: string;
+  current_pct: number;
+  eta_hours: number | null;
+  eta_str: string | null;
+  rate_per_hour: number;
+}
+
+export interface SlaIncident {
+  from: string;
+  to: string;
+  duration_min: number;
+}
+
+export interface SlaResult {
+  server_id: string;
+  start: string;
+  end: string;
+  uptime_pct: number;
+  downtime_min: number;
+  incidents: SlaIncident[];
+}
+
 export const api = {
   me: () => req<{ admin_id: number; authenticated: boolean }>("/api/auth/me"),
   overview: () => req<ServerOverview[]>("/api/dashboard/overview"),
@@ -126,6 +149,22 @@ export const api = {
     ),
   rdpLog: (id: string) => req<RdpLogEntry[]>(`/api/dashboard/servers/${id}/rdp-log`),
   authLogs: () => req<LoginLogEntry[]>("/api/dashboard/auth-logs"),
+  diskForecast: (id: string) =>
+    req<DiskForecast[]>(`/api/dashboard/servers/${id}/disk-forecast`),
+  serverSla: (id: string, year?: number, month?: number) => {
+    const p = new URLSearchParams();
+    if (year)  p.set("year",  String(year));
+    if (month) p.set("month", String(month));
+    const qs = p.toString();
+    return req<SlaResult>(`/api/dashboard/servers/${id}/sla${qs ? `?${qs}` : ""}`);
+  },
+  slaSummary: (year?: number, month?: number) => {
+    const p = new URLSearchParams();
+    if (year)  p.set("year",  String(year));
+    if (month) p.set("month", String(month));
+    const qs = p.toString();
+    return req<SlaResult[]>(`/api/dashboard/sla/summary${qs ? `?${qs}` : ""}`);
+  },
   logout: () =>
     fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }),
 };

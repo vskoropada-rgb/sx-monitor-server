@@ -2,6 +2,7 @@ import { api, AuthError } from "@/lib/api";
 import { Dashboard } from "@/pages/Dashboard";
 import { Login } from "@/pages/Login";
 import { ServerDetail } from "@/pages/ServerDetail";
+import { SlaPage } from "@/pages/SlaPage";
 import { useQuery } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
@@ -28,6 +29,7 @@ function AuthGate() {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/server/:id" element={<ServerDetail />} />
+      <Route path="/sla" element={<SlaPage />} />
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import type { HistoryPoint } from "@/lib/api";
+import type { HistoryPoint, SlaResult } from "@/lib/api";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { UsageBar } from "@/components/ui/Stat";
@@ -21,6 +21,7 @@ import {
   BarChart2,
   Download,
   History,
+  TrendingUp,
 } from "lucide-react";
 import type { RdpLogEntry } from "@/lib/api";
 import {
@@ -79,6 +80,19 @@ function chartTime(iso: string): string {
   return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
 }
 
+function slaTone(pct: number): "ok" | "warn" | "crit" {
+  if (pct >= 99.9) return "ok";
+  if (pct >= 99.0) return "warn";
+  return "crit";
+}
+
+function fmtDowntime(min: number): string {
+  if (min < 60) return `${min} хв`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m > 0 ? `${h}г ${m}хв` : `${h} год`;
+}
+
 // ── sub-sections ───────────────────────────────────────────────────────────────
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -89,6 +103,60 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-muted">{children}</p>;
+}
+
+// ── SLA section ───────────────────────────────────────────────────────────────
+
+function SlaSection({ sla }: { sla: SlaResult }) {
+  const now = new Date();
+  const monthLabel = now.toLocaleDateString("uk-UA", { month: "long", year: "numeric", timeZone: TZ });
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="w-4 h-4 text-accent" />
+          <span className="font-semibold">SLA — {monthLabel}</span>
+        </div>
+        <Badge tone={slaTone(sla.uptime_pct)}>{sla.uptime_pct}% uptime</Badge>
+      </CardHeader>
+      <CardBody className="space-y-3">
+        {sla.downtime_min === 0 ? (
+          <p className="text-sm text-ok">Простоїв не зафіксовано</p>
+        ) : (
+          <>
+            <p className="text-sm text-muted">
+              Сумарний простій:{" "}
+              <span className="text-text font-medium">{fmtDowntime(sla.downtime_min)}</span>
+              {" · "}
+              <span className="text-text font-medium">{sla.incidents.length}</span>{" "}
+              {sla.incidents.length === 1 ? "інцидент" : "інциденти(ів)"}
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted border-b border-border/60">
+                    <th className="text-left pb-1.5 font-medium w-36">Початок</th>
+                    <th className="text-left pb-1.5 font-medium w-36">Кінець</th>
+                    <th className="text-right pb-1.5 font-medium w-24">Тривалість</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {sla.incidents.map((inc, i) => (
+                    <tr key={i}>
+                      <td className="py-1.5 font-mono">{fmtDateTime(inc.from)}</td>
+                      <td className="py-1.5 font-mono">{fmtDateTime(inc.to)}</td>
+                      <td className="py-1.5 text-right text-warn">{fmtDowntime(inc.duration_min)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </CardBody>
+    </Card>
+  );
 }
 
 // ── chart section ──────────────────────────────────────────────────────────────
@@ -338,6 +406,20 @@ export function ServerDetail() {
     refetchInterval: 60000,
   });
 
+  const { data: diskForecasts = [] } = useQuery({
+    queryKey: ["diskForecast", id],
+    queryFn: () => api.diskForecast(id!),
+    enabled: !!id,
+    refetchInterval: 300000,
+  });
+
+  const { data: slaData } = useQuery({
+    queryKey: ["serverSla", id],
+    queryFn: () => api.serverSla(id!),
+    enabled: !!id,
+    refetchInterval: 120000,
+  });
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-muted">
@@ -473,6 +555,9 @@ export function ServerDetail() {
         {/* ── Section 2: Графіки CPU / RAM ─────────────────────────────────── */}
         <MetricsChart serverId={data.id} />
 
+        {/* ── Section 2b: SLA поточного місяця ───────────────────────────── */}
+        {slaData && <SlaSection sla={slaData} />}
+
         {/* ── Section 3: Диски ─────────────────────────────────────────────── */}
         {disks.length > 0 && (
           <Card>
@@ -510,6 +595,35 @@ export function ServerDetail() {
                   </div>
                 );
               })}
+
+              {diskForecasts.length > 0 && (
+                <div className="pt-3 mt-1 border-t border-border/40 space-y-1.5">
+                  <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">
+                    Прогноз заповнення
+                  </p>
+                  {diskForecasts.map((f) => (
+                    <div key={f.path_key} className="flex items-center justify-between text-xs">
+                      <span className="text-muted font-mono">{f.path_key}:</span>
+                      {f.eta_hours != null ? (
+                        <span
+                          className={cn(
+                            "font-medium",
+                            f.eta_hours < 24
+                              ? "text-crit"
+                              : f.eta_hours < 72
+                              ? "text-warn"
+                              : "text-ok"
+                          )}
+                        >
+                          ⏳ заповниться через {f.eta_str}
+                        </span>
+                      ) : (
+                        <span className="text-muted">стабільно</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardBody>
           </Card>
         )}

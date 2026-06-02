@@ -1,12 +1,18 @@
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { UsageBar } from "@/components/ui/Stat";
-import { type ServerOverview } from "@/lib/api";
+import { type ServerOverview, type SlaResult } from "@/lib/api";
 import { cn, diskColor, timeAgo } from "@/lib/utils";
 import { HardDrive, Server, Clock, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 
-export function ServerCard({ s }: { s: ServerOverview }) {
+function slaTone(pct: number): "ok" | "warn" | "crit" {
+  if (pct >= 99.9) return "ok";
+  if (pct >= 99.0) return "warn";
+  return "crit";
+}
+
+export function ServerCard({ s, sla }: { s: ServerOverview; sla?: SlaResult }) {
   const backupTone =
     s.backup.status === "critical" ? "crit"
     : s.backup.status === "warning" ? "warn"
@@ -71,10 +77,17 @@ export function ServerCard({ s }: { s: ServerOverview }) {
         )}
 
         <div className="mt-auto flex items-center justify-between pt-2 border-t border-border/60 text-xs">
-          <Badge tone={backupTone}>
-            бекап: {s.backup.status ?? "—"}
-            {s.backup.age_hours != null ? ` · ${s.backup.age_hours}г` : ""}
-          </Badge>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge tone={backupTone}>
+              бекап: {s.backup.status ?? "—"}
+              {s.backup.age_hours != null ? ` · ${s.backup.age_hours}г` : ""}
+            </Badge>
+            {sla != null && (
+              <Badge tone={slaTone(sla.uptime_pct)}>
+                {sla.uptime_pct}%
+              </Badge>
+            )}
+          </div>
           <span className="flex items-center gap-1 text-muted">
             <Clock className="w-3 h-3" /> {timeAgo(s.last_seen)}
           </span>
