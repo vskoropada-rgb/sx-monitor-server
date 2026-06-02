@@ -212,8 +212,8 @@ function ExportSection({
   async function handleExport() {
     setLoading(true);
     try {
-      const startISO = new Date(from + "T00:00:00").toISOString();
-      const endISO = new Date(to + "T23:59:59").toISOString();
+      const startISO = new Date(from + "T00:00:00+03:00").toISOString();
+      const endISO = new Date(to + "T23:59:59+03:00").toISOString();
       const history = await api.serverHistoryRange(serverId, startISO, endISO);
 
       const { default: jsPDF } = await import("jspdf");
@@ -394,7 +394,10 @@ export function ServerDetail() {
   const recentCommands = data.recent_commands.slice(0, 10);
 
   const backupTone =
-    backup.status === "critical" ? "crit" : backup.status === "warning" ? "warn" : "ok";
+    backup.status === "critical" ? "crit"
+    : backup.status === "warning" ? "warn"
+    : backup.status === "ok" ? "ok"
+    : "muted";
 
   return (
     <div className="min-h-screen">

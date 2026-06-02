@@ -192,13 +192,6 @@ def restart_service(service_name: str) -> Tuple[bool, str]:
     return False, f"Помилка запуску: {msg}"
 
 
-def start_service(service_name: str) -> Tuple[bool, str]:
-    code, msg = _net_command("start", service_name)
-    if code == 0:
-        return True, f"Сервіс «{service_name}» запущений"
-    return False, msg
-
-
 # ─── Перезавантаження ────────────────────────────────────────
 
 
@@ -212,14 +205,6 @@ def reboot_server(delay_sec: int = 30) -> Tuple[bool, str]:
         if r.returncode == 0:
             return True, f"🔄 Сервер перезавантажиться через {delay_sec} сек"
         return False, (r.stderr or r.stdout or "").strip()
-    except Exception as e:
-        return False, str(e)
-
-
-def cancel_reboot() -> Tuple[bool, str]:
-    try:
-        subprocess.run(["shutdown", "/a"], capture_output=True, timeout=10)
-        return True, "Перезавантаження скасовано"
     except Exception as e:
         return False, str(e)
 
@@ -323,6 +308,9 @@ _AGENT_FILES = [
 
 def update_agent(branch: str = "main") -> Tuple[bool, str]:
     """Завантажує нові файли агента з GitHub і виходить — watchdog перезапустить."""
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9._/-]{1,100}$', branch):
+        return False, f"Недозволена назва гілки: {branch!r}"
     import os
     import sys
     import urllib.request

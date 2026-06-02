@@ -182,6 +182,10 @@ def server_history(
         end_dt = datetime.utcnow()
         cutoff = end_dt - timedelta(hours=hours)
 
+    max_range = timedelta(days=30)
+    if end_dt - cutoff > max_range:
+        cutoff = end_dt - max_range
+
     rows = (
         db.query(Metric)
         .filter(

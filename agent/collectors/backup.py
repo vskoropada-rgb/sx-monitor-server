@@ -21,26 +21,6 @@ _DEFAULT_EXTS = ("zip", "rar", "7z")
 _MIN_VALID_SIZE = 1024  # байтів — менше вважаємо "too_small"
 
 
-# ─── Парсинг datetime з SQLite ───────────────────────────────
-
-
-def _parse_db_datetime(s: str) -> datetime:
-    """
-    SQLite зберігає DATETIME як 'YYYY-MM-DD HH:MM:SS' (через пробіл).
-    Python 3.8 fromisoformat() не приймає такий формат — тільки 'YYYY-MM-DDTHH:MM:SS'.
-    Цей хелпер обробляє обидва варіанти.
-    """
-    if not s:
-        raise ValueError("empty datetime string")
-    s = s.strip()
-    if "T" in s:
-        return datetime.fromisoformat(s)
-    # Обрізаємо можливі мікросекунди для strptime
-    if "." in s:
-        s = s.split(".", 1)[0]
-    return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-
-
 # ─── Перевірка цілісності ────────────────────────────────────
 
 

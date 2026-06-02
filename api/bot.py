@@ -386,10 +386,10 @@ def _handle_sessions(chat_id, topic_id, message_id, server: Server, metrics: dic
     lines = [f"👥 <b>Сесії — {server.name}</b>", ""]
     for s in sessions:
         lines.append(f"• {s.get('username', '?')} [{s.get('state', '?')}] "
-                     f"id={s.get('id', '?')}")
+                     f"id={s.get('session_id', '?')}")
 
     btns = [[{"text": f"🚫 Kick {s.get('username','?')}",
-              "callback_data": f"kill_confirm_{s.get('id', '0')}_{server.id}"}]
+              "callback_data": f"kill_confirm_{s.get('session_id', '0')}_{server.id}"}]
             for s in sessions[:5]]
     btns.append([{"text": "🚫 Завершити всіх", "callback_data": f"kill_confirm_all_{server.id}"}])
     _send(chat_id, "\n".join(lines), topic_id, {"inline_keyboard": btns}, message_id)
@@ -444,8 +444,8 @@ def _handle_kill_menu(chat_id, topic_id, message_id, server: Server, metrics: di
     if not sessions:
         _send(chat_id, "Активних сесій немає", topic_id, message_id=message_id)
         return
-    btns = [[{"text": f"❌ {s.get('username','?')} (id={s.get('id','?')})",
-              "callback_data": f"kill_confirm_{s.get('id','0')}_{server.id}"}]
+    btns = [[{"text": f"❌ {s.get('username','?')} (id={s.get('session_id','?')})",
+              "callback_data": f"kill_confirm_{s.get('session_id','0')}_{server.id}"}]
             for s in sessions[:5]]
     btns.append([{"text": "❌ Всі сесії", "callback_data": f"kill_confirm_all_{server.id}"}])
     _send(chat_id, "Оберіть сесію для завершення:", topic_id,

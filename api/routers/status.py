@@ -7,6 +7,7 @@ import requests
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+import security
 from config import settings
 from database import get_db
 from models import Server, MetricsSnapshot
@@ -63,7 +64,7 @@ def _send_registration_message(name: str, topic_id: str, action: str):
 
 
 @router.get("/servers")
-def list_servers(db: Session = Depends(get_db)):
+def list_servers(db: Session = Depends(get_db), _: int = Depends(security.require_admin)):
     servers = db.query(Server).all()
     return [
         {
@@ -76,7 +77,7 @@ def list_servers(db: Session = Depends(get_db)):
 
 
 @router.get("/status/{server_id}")
-def server_status(server_id: str, db: Session = Depends(get_db)):
+def server_status(server_id: str, db: Session = Depends(get_db), _: int = Depends(security.require_admin)):
     snap = db.query(MetricsSnapshot).filter(
         MetricsSnapshot.server_id == server_id
     ).first()
@@ -86,7 +87,7 @@ def server_status(server_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/status")
-def all_status(db: Session = Depends(get_db)):
+def all_status(db: Session = Depends(get_db), _: int = Depends(security.require_admin)):
     snaps = db.query(MetricsSnapshot).all()
     return {s.server_id: s.data for s in snaps}
 

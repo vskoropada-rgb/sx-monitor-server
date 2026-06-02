@@ -8,7 +8,10 @@ import { Link } from "react-router-dom";
 
 export function ServerCard({ s }: { s: ServerOverview }) {
   const backupTone =
-    s.backup.status === "critical" ? "crit" : s.backup.status === "warning" ? "warn" : "ok";
+    s.backup.status === "critical" ? "crit"
+    : s.backup.status === "warning" ? "warn"
+    : s.backup.status === "ok" ? "ok"
+    : "muted";
 
   return (
     <Link to={`/server/${s.id}`} className="block">

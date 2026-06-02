@@ -19,17 +19,6 @@ def get_conn():
 def init_db():
     with get_conn() as conn:
         conn.executescript("""
-        CREATE TABLE IF NOT EXISTS alerts (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            alert_key   TEXT NOT NULL,
-            alert_type  TEXT NOT NULL,
-            severity    TEXT NOT NULL,
-            message     TEXT,
-            sent_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-            resolved_at DATETIME
-        );
-        CREATE INDEX IF NOT EXISTS idx_alerts_key ON alerts(alert_key, sent_at);
-
         CREATE TABLE IF NOT EXISTS metrics (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             metric_name TEXT NOT NULL,
@@ -62,12 +51,6 @@ def init_db():
         CREATE TABLE IF NOT EXISTS known_admins (
             username    TEXT PRIMARY KEY,
             added_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        -- Режим обслуговування (maintenance) per server
-        CREATE TABLE IF NOT EXISTS maintenance (
-            server_id TEXT PRIMARY KEY,
-            until_ts  DATETIME NOT NULL
         );
 
         -- Історія бекапів (для графіку розміру та розкладу)
@@ -106,60 +89,7 @@ def init_db():
             blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
-        -- Кеш останніх метрик для швидкого відображення в боті
-        CREATE TABLE IF NOT EXISTS metrics_cache (
-            key        TEXT PRIMARY KEY,
-            data       TEXT NOT NULL,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        -- Накопичені (дайджест) алерти — warning/info до щоденного звіту
-        CREATE TABLE IF NOT EXISTS pending_alerts (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            alert_key  TEXT NOT NULL UNIQUE,
-            title      TEXT NOT NULL,
-            body       TEXT DEFAULT '',
-            severity   TEXT NOT NULL DEFAULT 'warning',
-            added_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            count      INTEGER DEFAULT 1
-        );
         """)
-
-
-# ─── Alerts ──────────────────────────────────────────────────
-
-def _parse_dt(s: str) -> datetime:
-    """Розбирає datetime з SQLite ('YYYY-MM-DD HH:MM:SS') або ISO ('...T...')."""
-    s = s.strip()
-    if "T" in s:
-        return datetime.fromisoformat(s)
-    if "." in s:
-        s = s.split(".", 1)[0]
-    return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-
-
-def can_send_alert(alert_key: str, cooldown_min: int = 30) -> bool:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT sent_at FROM alerts WHERE alert_key = ? ORDER BY sent_at DESC LIMIT 1",
-            (alert_key,)
-        ).fetchone()
-        if not row:
-            return True
-        try:
-            last = _parse_dt(row["sent_at"])
-        except (ValueError, TypeError):
-            return True
-        return datetime.now() - last > timedelta(minutes=cooldown_min)
-
-
-def record_alert(alert_key: str, alert_type: str, severity: str, message: str):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO alerts (alert_key, alert_type, severity, message) VALUES (?, ?, ?, ?)",
-            (alert_key, alert_type, severity, message)
-        )
 
 
 # ─── Metrics ─────────────────────────────────────────────────
@@ -251,46 +181,6 @@ def add_known_admin(username: str):
         conn.execute("INSERT OR IGNORE INTO known_admins (username) VALUES (?)", (username,))
 
 
-# ─── Maintenance ─────────────────────────────────────────────
-
-def set_maintenance(server_id: str, until: datetime):
-    with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO maintenance (server_id, until_ts) VALUES (?, ?)
-            ON CONFLICT(server_id) DO UPDATE SET until_ts=excluded.until_ts
-        """, (server_id, until.isoformat()))
-
-
-def clear_maintenance(server_id: str):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM maintenance WHERE server_id = ?", (server_id,))
-
-
-def is_maintenance(server_id: str) -> bool:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT until_ts FROM maintenance WHERE server_id = ?", (server_id,)
-        ).fetchone()
-        if not row:
-            return False
-        until = datetime.fromisoformat(row["until_ts"])
-        if datetime.now() > until:
-            clear_maintenance(server_id)
-            return False
-        return True
-
-
-def get_maintenance_until(server_id: str) -> Optional[datetime]:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT until_ts FROM maintenance WHERE server_id = ?", (server_id,)
-        ).fetchone()
-        if not row:
-            return None
-        until = datetime.fromisoformat(row["until_ts"])
-        return until if datetime.now() <= until else None
-
-
 # ─── Backup history ──────────────────────────────────────────
 
 def is_known_backup(filename: str) -> bool:
@@ -322,17 +212,6 @@ def get_backup_integrity(filename: str) -> Optional[str]:
             "SELECT integrity FROM backup_history WHERE filename = ?", (filename,)
         ).fetchone()
         return row["integrity"] if row else None
-
-
-def get_backup_history(days: int = 30) -> list:
-    since = datetime.now() - timedelta(days=days)
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT filename, size_bytes, mtime, detected_at, integrity "
-            "FROM backup_history WHERE detected_at > ? ORDER BY detected_at",
-            (since.isoformat(),)
-        ).fetchall()
-    return [dict(r) for r in rows]
 
 
 # ─── USB devices ─────────────────────────────────────────────
@@ -384,56 +263,6 @@ def register_task(task_name: str):
         )
 
 
-# ─── Pending (digest) alerts ─────────────────────────────────
-
-def add_pending_alert(alert_key: str, title: str, body: str, severity: str):
-    with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO pending_alerts (alert_key, title, body, severity)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(alert_key) DO UPDATE SET
-                title=excluded.title,
-                body=excluded.body,
-                updated_at=CURRENT_TIMESTAMP,
-                count=count+1
-        """, (alert_key, title, body or "", severity))
-
-
-def get_pending_alerts() -> list:
-    sev_order = {"critical": 0, "warning": 1, "info": 2}
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT alert_key, title, body, severity, count, added_at "
-            "FROM pending_alerts ORDER BY added_at"
-        ).fetchall()
-    result = [dict(r) for r in rows]
-    result.sort(key=lambda x: sev_order.get(x.get("severity", "info"), 2))
-    return result
-
-
-def clear_pending_alerts():
-    with get_conn() as conn:
-        conn.execute("DELETE FROM pending_alerts")
-
-
-# ─── Metrics cache ───────────────────────────────────────────
-
-def cache_metrics(data: dict):
-    with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO metrics_cache (key, data) VALUES ('last', ?)
-            ON CONFLICT(key) DO UPDATE SET data=excluded.data, updated_at=CURRENT_TIMESTAMP
-        """, (json.dumps(data, default=str),))
-
-
-def load_metrics_cache() -> dict:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT data FROM metrics_cache WHERE key='last'"
-        ).fetchone()
-        return json.loads(row["data"]) if row else {}
-
-
 # ─── Blocked IPs ─────────────────────────────────────────────
 
 def record_blocked_ip(ip: str):
@@ -451,13 +280,3 @@ def get_blocked_ips() -> set:
         rows = conn.execute("SELECT ip FROM blocked_ips").fetchall()
         return {r["ip"] for r in rows}
 
-
-# ─── Cleanup ─────────────────────────────────────────────────
-
-def cleanup_old_metrics(days: int = 30):
-    cutoff = datetime.now() - timedelta(days=days)
-    with get_conn() as conn:
-        conn.execute("DELETE FROM metrics WHERE recorded_at < ?", (cutoff.isoformat(),))
-        # Backup history зберігаємо 90 днів для графіку тренду
-        cutoff_backup = datetime.now() - timedelta(days=90)
-        conn.execute("DELETE FROM backup_history WHERE detected_at < ?", (cutoff_backup.isoformat(),))

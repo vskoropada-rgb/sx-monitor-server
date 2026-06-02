@@ -110,6 +110,7 @@ def _save_numeric_metrics(db: Session, server_id: str, payload: dict, now: datet
 
 def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
     """Викликається у фоновому потоці після збереження метрик."""
+    db = None
     try:
         import analyzer
         import notifier
@@ -135,6 +136,10 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
             "ALERT_COOLDOWN_MIN":     str(settings.alert_cooldown_min),
             "DAILY_REPORT_HOUR":      str(settings.daily_report_hour),
             "REPORT_UTC_OFFSET":      str(settings.report_utc_offset),
+            "DISK_WARNING_PERCENT":   str(settings.disk_warning_percent),
+            "DISK_CRITICAL_PERCENT":  str(settings.disk_critical_percent),
+            "CPU_WARNING_PERCENT":    str(settings.cpu_warning_percent),
+            "RAM_WARNING_PERCENT":    str(settings.ram_warning_percent),
         }
 
         decision = analyzer.analyze(payload, config)
@@ -176,7 +181,8 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
         import logging
         logging.getLogger(__name__).error("analyze_and_alert error: %s", e)
     finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
