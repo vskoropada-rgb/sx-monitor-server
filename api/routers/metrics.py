@@ -138,6 +138,17 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
         }
 
         decision = analyzer.analyze(payload, config)
+
+        # Щоденний звіт — завжди перевіряємо, незалежно від наявності алертів
+        utc_offset = int(config.get("REPORT_UTC_OFFSET", 0))
+        now = datetime.utcnow() + timedelta(hours=utc_offset)
+        if now.hour == int(config["DAILY_REPORT_HOUR"]) and now.minute < 2:
+            if storage.can_send_alert(db, server_id, "daily_report", 22 * 60):
+                pending = storage.get_pending_alerts(db, server_id)
+                notifier.send_daily_report(payload, config, pending_alerts=pending)
+                storage.clear_pending_alerts(db, server_id)
+                storage.record_alert(db, server_id, "daily_report", "report", "info", "sent")
+
         if not decision or not decision.get("should_alert"):
             return
 
@@ -160,16 +171,6 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
             storage.record_alert(db, server_id, alert_key,
                                  decision.get("tags", [""])[0], severity,
                                  decision.get("title", ""))
-
-        # Щоденний звіт (now у локальному часі за REPORT_UTC_OFFSET)
-        utc_offset = int(config.get("REPORT_UTC_OFFSET", 0))
-        now = datetime.utcnow() + timedelta(hours=utc_offset)
-        if now.hour == int(config["DAILY_REPORT_HOUR"]) and now.minute < 2:
-            if storage.can_send_alert(db, server_id, "daily_report", 22 * 60):
-                pending = storage.get_pending_alerts(db, server_id)
-                notifier.send_daily_report(payload, config, pending_alerts=pending)
-                storage.clear_pending_alerts(db, server_id)
-                storage.record_alert(db, server_id, "daily_report", "report", "info", "sent")
 
     except Exception as e:
         import logging
