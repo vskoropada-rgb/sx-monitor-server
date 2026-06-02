@@ -185,6 +185,19 @@ def handle_callback(update: dict):
     message_id = msg.get("message_id")
     topic_id   = str(msg.get("message_thread_id", "")) or None
 
+    # Авторизація: керувати агентами через кнопки можуть лише адміни.
+    # Бот працює на getUpdates і отримує апдейти з будь-якого чату/DM,
+    # тож без цієї перевірки будь-хто міг би тригерити команди (reboot,
+    # update_agent, block_ip тощо) на Windows-серверах.
+    user_id = cb.get("from", {}).get("id")
+    if not settings.admin_ids or user_id not in settings.admin_ids:
+        _api("answerCallbackQuery", {
+            "callback_query_id": cb.get("id", ""),
+            "text": "⛔️ Немає доступу",
+            "show_alert": True,
+        })
+        return
+
     _api("answerCallbackQuery", {"callback_query_id": cb["id"]})
 
     # ack|server_id|hours|alert_key  — окремий формат, не через _get_server_by_callback
@@ -491,8 +504,13 @@ def handle_message(update: dict):
     text     = (msg.get("text") or "").strip()
     chat_id  = str(msg.get("chat", {}).get("id", ""))
     topic_id = str(msg.get("message_thread_id", "")) or None
+    user_id  = msg.get("from", {}).get("id")
 
     if text.startswith("/status"):
+        # /status показує метрики сервера — лише для адмінів.
+        if not settings.admin_ids or user_id not in settings.admin_ids:
+            _send(chat_id, "⛔️ У вас немає доступу.", topic_id)
+            return
         db: Session = SessionLocal()
         try:
             if topic_id:
@@ -517,10 +535,6 @@ def handle_message(update: dict):
 
     if not text.startswith("/login"):
         return
-
-    user    = msg.get("from", {})
-    user_id = user.get("id")
-    chat_id = str(msg.get("chat", {}).get("id", ""))
 
     if user_id not in settings.admin_ids:
         _send(chat_id, "⛔️ У вас немає доступу до дашборду.")
