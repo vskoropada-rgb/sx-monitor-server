@@ -67,6 +67,11 @@ services:
     restart: always
     ports:
       - "80:80"
+      - "443:443"
+    # Щоб підставити справжній сертифікат (Let's Encrypt тощо) — розкоментуй
+    # і поклади self.crt + self.key у ./nginx/certs на сервері:
+    # volumes:
+    #   - ./nginx/certs:/etc/nginx/certs:ro
     depends_on: [api, grafana, frontend]
     networks: [internal]
 
