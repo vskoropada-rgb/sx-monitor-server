@@ -50,3 +50,23 @@ def init_db():
         ]:
             conn.execute(text(stmt))
         conn.commit()
+
+        # One-time migration: hash any plaintext API keys left from older
+        # deployments. A SHA-256 hex digest is exactly 64 lowercase hex chars;
+        # anything else is a legacy plaintext key and gets hashed in place.
+        # Idempotent — already-hashed keys are skipped, so existing agents keep
+        # authenticating (the server hashes the incoming key before lookup).
+        import hashlib
+        _hexset = set("0123456789abcdef")
+        rows = conn.execute(text("SELECT id, api_key FROM servers")).fetchall()
+        for sid, key in rows:
+            if not key:
+                continue
+            if len(key) == 64 and set(key) <= _hexset:
+                continue  # already hashed
+            digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+            conn.execute(
+                text("UPDATE servers SET api_key = :k WHERE id = :i"),
+                {"k": digest, "i": sid},
+            )
+        conn.commit()

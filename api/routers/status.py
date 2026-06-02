@@ -2,12 +2,14 @@
 Статус серверів для Telegram бота і дашборду.
 """
 import logging
+import secrets as _secrets
 
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 import security
+from auth import hash_api_key
 from config import settings
 from database import get_db
 from models import Server, MetricsSnapshot
@@ -105,7 +107,9 @@ def register_server(
     Якщо tg_topic_id не передано — сервер сам створює Forum Topic у
     Telegram-групі під назвою компанії (бо токен бота лише на сервері).
     """
-    if not settings.register_secret or x_register_secret != settings.register_secret:
+    if not settings.register_secret or not _secrets.compare_digest(
+        x_register_secret, settings.register_secret
+    ):
         raise HTTPException(status_code=403, detail="Invalid register secret")
 
     from models import Server as ServerModel
@@ -129,7 +133,7 @@ def register_server(
     server = ServerModel(
         id=payload["server_id"],
         name=name,
-        api_key=payload["api_key"],
+        api_key=hash_api_key(payload["api_key"]),
         tg_topic_id=topic_id,
     )
     db.add(server)

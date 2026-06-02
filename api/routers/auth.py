@@ -6,6 +6,8 @@
   POST /api/auth/logout       — вихід
   POST /api/auth/login-token  — внутрішній: бот просить одноразовий токен (захищено shared-secret)
 """
+import secrets as _secrets
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -81,7 +83,7 @@ def create_login_token(
     x_internal_secret: str = Header(default=""),
     db: Session = Depends(get_db),
 ):
-    if x_internal_secret != settings.secret_key:
+    if not _secrets.compare_digest(x_internal_secret, settings.secret_key):
         raise HTTPException(status_code=403, detail="Forbidden")
     if body.admin_id not in settings.admin_ids:
         raise HTTPException(status_code=403, detail="Not an admin")
