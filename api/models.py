@@ -157,7 +157,16 @@ class ServerHeartbeat(Base):
     changed_at = Column(DateTime, default=datetime.utcnow)
 
 
-class UptimeEvent(Base):
+class IdracSource(Base):
+    """Зареєстроване iDRAC-джерело подій для конкретного сервера."""
+    __tablename__ = "idrac_sources"
+
+    id          = Column(String, primary_key=True)
+    server_id   = Column(String, ForeignKey("servers.id"), nullable=False)
+    name        = Column(String, nullable=False)
+    secret_hash = Column(String, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
     """Лог переходів онлайн/офлайн для розрахунку SLA."""
     __tablename__ = "uptime_events"
     __table_args__ = (
