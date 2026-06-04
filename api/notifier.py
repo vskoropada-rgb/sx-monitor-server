@@ -5,7 +5,9 @@ notifier.py — відправка повідомлень в Telegram.
 import json
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
     title   = decision.get("title", "Подія на сервері")
     tags    = decision.get("tags", [])
     analysis = decision.get("analysis", "")
-    now     = datetime.now().strftime("%H:%M")
+    now     = (datetime.utcnow() + timedelta(hours=settings.report_utc_offset)).strftime("%H:%M")
 
     lines = [f"{icon} <b>{title}</b>  {now}"]
     if analysis:
@@ -69,7 +71,7 @@ def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
 def send_daily_report(metrics: dict, config: dict, pending_alerts: list = None,
                       forecasts: list = None) -> bool:
     company = config.get("COMPANY_NAME", config.get("SERVER_ID", "Server"))
-    now     = datetime.now()
+    now     = datetime.utcnow() + timedelta(hours=settings.report_utc_offset)
 
     disk_lines = []
     for d in metrics.get("disks", []):
@@ -157,8 +159,12 @@ def send_sla_report(db, config_by_server: dict, servers: list,
             if incidents:
                 lines += ["", "📋 <b>Інциденти:</b>"]
                 for inc in incidents[:5]:
+                    from_dt = (datetime.fromisoformat(inc['from'])
+                               + timedelta(hours=settings.report_utc_offset))
+                    to_dt   = (datetime.fromisoformat(inc['to'])
+                               + timedelta(hours=settings.report_utc_offset))
                     lines.append(
-                        f"  • {inc['from'][:16]} — {inc['to'][11:16]} "
+                        f"  • {from_dt.strftime('%d.%m %H:%M')} — {to_dt.strftime('%H:%M')} "
                         f"({inc['duration_min']} хв)"
                     )
                 if len(incidents) > 5:

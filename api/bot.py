@@ -306,7 +306,7 @@ def handle_callback(update: dict):
             db.close()
         _send(chat_id,
               f"🔧 <b>{server.name}</b> переведено в режим обслуговування на 2 години.\n"
-              f"Алерти призупинено до {(datetime.now() + timedelta(hours=2)).strftime('%H:%M')}",
+              f"Алерти призупинено до {(datetime.utcnow() + timedelta(hours=settings.report_utc_offset + 2)).strftime('%H:%M')}",
               topic_id,
               {"inline_keyboard": [[
                   {"text": "✅ Зняти обслуговування", "callback_data": f"maintenance_off_{server.id}"}
@@ -361,8 +361,9 @@ def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict)
     ram  = metrics.get("ram", {})
     disks = metrics.get("disks", [])
 
+    local_now = datetime.utcnow() + timedelta(hours=settings.report_utc_offset)
     lines = [f"📊 <b>Статус — {server.name}</b>",
-             f"🕐 {datetime.now().strftime('%H:%M:%S')}", ""]
+             f"🕐 {local_now.strftime('%H:%M:%S')}", ""]
 
     lines.append(f"🖥 CPU: <b>{cpu.get('percent', '?')}%</b>  "
                  f"RAM: <b>{ram.get('percent', '?')}%</b> "

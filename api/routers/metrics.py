@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from database import get_db
 from models import Server, Metric, MetricsSnapshot, RdpLog
 from auth import get_server
+from config import settings
 
 router = APIRouter(prefix="/api", tags=["metrics"])
 
@@ -58,7 +59,9 @@ def _save_rdp_events(db: Session, server_id: str, logins: list):
         if not time_str:
             continue
         try:
-            event_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            # Agent sends local time; subtract offset to normalise to UTC for storage
+            event_time = (datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                          - timedelta(hours=settings.report_utc_offset))
         except ValueError:
             continue
         try:
