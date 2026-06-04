@@ -109,7 +109,8 @@ def collect_brute_force(config: dict) -> dict:
             pass
 
     events = _get_events("Security", [4625, 4771], minutes=window_min)
-    ip_attempts = defaultdict(list)
+    ip_attempts    = defaultdict(list)
+    ip_workstations = defaultdict(set)  # ip → назви пристроїв
 
     for rec in events:
         try:
@@ -117,8 +118,11 @@ def collect_brute_force(config: dict) -> dict:
             event_id = rec.EventID & 0xFFFF
             ip = _extract_ip_from_strings(strings, event_id)
             if event_id == 4625:
-                username = strings[5].strip() if len(strings) > 5 and strings[5] else "unknown"
-            else:  # 4771
+                username    = strings[5].strip() if len(strings) > 5  and strings[5]  else "unknown"
+                workstation = strings[13].strip() if len(strings) > 13 and strings[13] else ""
+                if workstation and workstation not in ("-", "", "–"):
+                    ip_workstations[ip].add(workstation)
+            else:  # 4771 Kerberos
                 username = strings[0].strip() if strings and strings[0] else "unknown"
             ip_attempts[ip].append(username)
             logger.debug("brute_force event %d: ip=%r user=%r strings_len=%d",
@@ -145,7 +149,8 @@ def collect_brute_force(config: dict) -> dict:
                 alerts.append({
                     "ip": "",
                     "count": count,
-                    "usernames": list(set(users))[:5],
+                    "usernames": list(dict.fromkeys(users))[:5],
+                    "workstations": [],
                     "is_known_network": True,  # не блокуємо, не зовнішній IP
                 })
             continue
@@ -160,7 +165,8 @@ def collect_brute_force(config: dict) -> dict:
         entry = {
             "ip": ip,
             "count": count,
-            "usernames": list(set(users))[:5],
+            "usernames": list(dict.fromkeys(users))[:5],
+            "workstations": list(ip_workstations.get(ip, set()))[:3],
             "is_known_network": is_known,
         }
 

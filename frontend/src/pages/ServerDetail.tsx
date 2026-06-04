@@ -1167,11 +1167,29 @@ export function ServerDetail() {
             <CardBody className="space-y-4">
               {bruteForce.length > 0 && (
                 <div>
-                  <SectionTitle>Brute force ({bruteForce.length})</SectionTitle>
-                  <ul className="space-y-1">
+                  <SectionTitle>Невдалі входи ({bruteForce.length})</SectionTitle>
+                  <ul className="space-y-2">
                     {bruteForce.map((a: any, i: number) => (
-                      <li key={i} className="text-xs text-crit font-mono">
-                        {typeof a === "string" ? a : JSON.stringify(a)}
+                      <li key={i} className="text-xs space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className={cn("font-mono font-medium", a.is_known_network ? "text-warn" : "text-crit")}>
+                            {a.ip || "локальний"}
+                          </span>
+                          <span className="text-muted">{a.count} спроб</span>
+                          {a.is_known_network && (
+                            <Badge tone="warn">внутр. мережа</Badge>
+                          )}
+                        </div>
+                        {a.usernames?.length > 0 && (
+                          <div className="text-muted pl-1">
+                            Користувач: <span className="text-text font-medium">{a.usernames.join(", ")}</span>
+                          </div>
+                        )}
+                        {a.workstations?.length > 0 && (
+                          <div className="text-muted pl-1">
+                            Пристрій: <span className="text-text font-mono">{a.workstations.join(", ")}</span>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>

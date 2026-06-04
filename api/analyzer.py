@@ -214,12 +214,14 @@ def _fallback_rules(metrics: dict, config: dict, stable_key: str = None) -> Opti
     for bf in metrics.get("brute_force_alerts", []):
         if not bf.get("ip"):
             continue
+        users_str = ", ".join(bf.get("usernames", [])[:3])
+        ws_str    = ", ".join(bf.get("workstations", [])[:2])
+        suffix = (f" · {users_str}" if users_str else "") + (f" [{ws_str}]" if ws_str else "")
         if not bf["is_known_network"]:
-            alerts.append(("critical", f"Перебір паролів {bf['ip']}: {bf['count']} спроб",
+            alerts.append(("critical", f"Перебір паролів {bf['ip']}: {bf['count']} спроб{suffix}",
                            ["#critical", "#brute_force", "#security"]))
         else:
-            # Відома мережа, але все одно підозріло — warning
-            alerts.append(("warning", f"Невдалі входи {bf['ip']}: {bf['count']} спроб (внутр. мережа)",
+            alerts.append(("warning", f"Невдалі входи {bf['ip']}: {bf['count']} спроб (внутр. мережа){suffix}",
                            ["#warning", "#brute_force", "#security"]))
 
     if metrics.get("new_admins"):
