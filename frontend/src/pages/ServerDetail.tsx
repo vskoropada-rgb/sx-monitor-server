@@ -934,7 +934,6 @@ export function ServerDetail() {
           {data.agent_version && (
             <Badge tone={data.agent_outdated ? "warn" : "muted"}>
               {data.agent_outdated ? "⬆️ " : ""}v{data.agent_version}
-              {data.agent_outdated ? ` → ${data.latest_agent_version}` : ""}
             </Badge>
           )}
 

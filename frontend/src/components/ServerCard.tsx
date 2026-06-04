@@ -102,7 +102,6 @@ export function ServerCard({ s, sla }: { s: ServerOverview; sla?: SlaResult }) {
         {s.agent_version && (
           <Badge tone={s.agent_outdated ? "warn" : "muted"}>
             {s.agent_outdated ? "⬆️ " : ""}v{s.agent_version}
-            {s.agent_outdated ? ` → ${s.latest_agent_version}` : ""}
           </Badge>
         )}
       </CardBody>
