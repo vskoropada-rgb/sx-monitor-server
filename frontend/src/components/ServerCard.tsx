@@ -100,10 +100,10 @@ export function ServerCard({ s, sla }: { s: ServerOverview; sla?: SlaResult }) {
         )}
 
         {s.agent_version && (
-          <div className={cn("text-xs", s.agent_outdated ? "text-warn" : "text-muted")}>
-            {s.agent_outdated ? "⬆️ " : ""}Агент {s.agent_version}
-            {s.agent_outdated ? " (застарів)" : ""}
-          </div>
+          <Badge tone={s.agent_outdated ? "warn" : "muted"}>
+            {s.agent_outdated ? "⬆️ " : ""}v{s.agent_version}
+            {s.agent_outdated ? ` → ${s.latest_agent_version}` : ""}
+          </Badge>
         )}
       </CardBody>
     </Card>

@@ -38,6 +38,7 @@ export interface ServerOverview {
   reboot_required: boolean;
   agent_version: string | null;
   agent_outdated: boolean;
+  latest_agent_version: string;
 }
 
 export interface HistoryPoint {

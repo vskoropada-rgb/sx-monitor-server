@@ -69,6 +69,7 @@ def overview(db: Session = Depends(get_db)):
             "agent_outdated": bool(
                 s.agent_version and s.agent_version != LATEST_AGENT_VERSION
             ),
+            "latest_agent_version": LATEST_AGENT_VERSION,
         })
     return result
 
