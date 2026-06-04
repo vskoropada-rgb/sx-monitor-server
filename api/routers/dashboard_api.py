@@ -15,7 +15,7 @@ import security
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
                    dependencies=[Depends(security.require_admin)])
 
-LATEST_AGENT_VERSION = "1.4.0"
+LATEST_AGENT_VERSION = "1.4.1"
 
 ONLINE_THRESHOLD = timedelta(minutes=5)
 
