@@ -3,11 +3,12 @@ heartbeat.py — перевіряє last_seen кожного сервера, ш�
 Також записує UptimeEvent при кожній зміні стану (для SLA-розрахунків).
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 import storage_helpers as storage
+from config import settings
 from models import Server, ServerHeartbeat, UptimeEvent
 
 logger = logging.getLogger(__name__)
@@ -55,14 +56,14 @@ def check_heartbeats(db: Session, config_by_server: dict):
             db.commit()
             cfg = config_by_server.get(server.id, {})
             if cfg and storage.can_send_alert(db, server.id, "heartbeat_offline", 30):
-                last_seen_str = (
-                    server.last_seen.strftime("%H:%M")
-                    if server.last_seen
-                    else "невідомо"
-                )
+                if server.last_seen:
+                    local_dt = server.last_seen + timedelta(hours=settings.report_utc_offset)
+                    last_seen_str = local_dt.strftime("%H:%M")
+                else:
+                    last_seen_str = "невідомо"
                 notifier.send_message(
                     f"🔴 <b>{server.name}</b> — агент не відповідає\n"
-                    f"Останній зв'язок: {last_seen_str} UTC\n"
+                    f"Останній зв'язок: {last_seen_str}\n"
                     f"Можливо, сервер недоступний або агент зупинено.",
                     cfg,
                     {"inline_keyboard": [[
@@ -72,7 +73,7 @@ def check_heartbeats(db: Session, config_by_server: dict):
                 )
                 storage.record_alert(
                     db, server.id, "heartbeat_offline", "heartbeat", "critical",
-                    f"offline since {last_seen_str}",
+                    f"offline since {last_seen_str} (local)",
                 )
 
         elif not was_online and is_online:
