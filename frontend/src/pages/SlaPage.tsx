@@ -153,20 +153,20 @@ export function SlaPage() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 backdrop-blur bg-bg/80 border-b border-border">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-3">
+        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
+            className="flex items-center gap-1 sm:gap-1.5 text-sm text-muted hover:text-text transition-colors shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
-            {t("common.back")}
+            <span className="hidden sm:inline">{t("common.back")}</span>
           </button>
-          <span className="text-border">|</span>
-          <TrendingUp className="w-4 h-4 text-accent" />
+          <span className="text-border hidden sm:block">|</span>
+          <TrendingUp className="w-4 h-4 text-accent shrink-0" />
           <span className="font-bold">{t("sla.pageTitle")}</span>
 
           {avgUptime != null && (
-            <Badge tone={slaTone(avgUptime)} className="ml-2">
+            <Badge tone={slaTone(avgUptime)} className="ml-1 sm:ml-2">
               {t("sla.average", { pct: avgUptime.toFixed(2) })}
             </Badge>
           )}

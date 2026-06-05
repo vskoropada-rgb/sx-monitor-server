@@ -889,18 +889,18 @@ export function ServerDetail() {
     <div className="min-h-screen">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-10 backdrop-blur bg-bg/80 border-b border-border">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-3">
+        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
+            className="flex items-center gap-1 sm:gap-1.5 text-sm text-muted hover:text-text transition-colors shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
-            {t("common.back")}
+            <span className="hidden sm:inline">{t("common.back")}</span>
           </button>
 
-          <span className="text-border">|</span>
+          <span className="text-border hidden sm:block">|</span>
 
-          <span className="font-bold truncate">{data.name}</span>
+          <span className="font-bold truncate min-w-0 flex-1">{data.name}</span>
 
           {data.online ? (
             <Badge tone="ok">
@@ -911,14 +911,14 @@ export function ServerDetail() {
           )}
 
           {data.agent_version && (
-            <Badge tone={data.agent_outdated ? "warn" : "muted"}>
+            <Badge tone={data.agent_outdated ? "warn" : "muted"} className="hidden sm:inline-flex">
               {data.agent_outdated ? "⬆️ " : ""}v{data.agent_version}
             </Badge>
           )}
 
-          <span className="ml-auto flex items-center gap-1 text-xs text-muted">
+          <span className="flex items-center gap-1 text-xs text-muted shrink-0">
             <Clock className="w-3.5 h-3.5" />
-            {timeAgo(data.last_seen)}
+            <span className="hidden sm:inline">{timeAgo(data.last_seen)}</span>
           </span>
           <LanguageToggle />
         </div>
@@ -1282,7 +1282,7 @@ export function ServerDetail() {
             </div>
             <span className="text-xs text-muted">{tn("records", rdpLog.length)}</span>
           </CardHeader>
-          <CardBody className="p-0 max-h-72 overflow-y-auto">
+          <CardBody className="p-0 max-h-72 overflow-y-auto overflow-x-auto">
             {rdpLog.length === 0 ? (
               <p className="text-sm text-muted px-4 py-3">{t("rdp.logEmpty")}</p>
             ) : (
