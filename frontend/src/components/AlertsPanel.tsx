@@ -1,11 +1,13 @@
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { api } from "@/lib/api";
-import { severityColor, timeAgo } from "@/lib/utils";
+import { severityColor } from "@/lib/utils";
+import { useI18n } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, BellRing } from "lucide-react";
 
 export function AlertsPanel() {
+  const { t, tn, timeAgo } = useI18n();
   const { data } = useQuery({ queryKey: ["alerts"], queryFn: api.alerts, refetchInterval: 15000 });
 
   const pending = data?.pending ?? [];
@@ -15,8 +17,8 @@ export function AlertsPanel() {
     <Card className="h-full flex flex-col">
       <CardHeader className="flex items-center gap-2">
         <BellRing className="w-4 h-4 text-warn" />
-        <span className="font-semibold">Алерти</span>
-        {pending.length > 0 && <Badge tone="warn">{pending.length} накопичено</Badge>}
+        <span className="font-semibold">{t("alerts.panelTitle")}</span>
+        {pending.length > 0 && <Badge tone="warn">{tn("pending", pending.length)}</Badge>}
       </CardHeader>
       <CardBody className="flex-1 overflow-y-auto scrollbar-thin space-y-2">
         {pending.map((p) => (
@@ -33,7 +35,7 @@ export function AlertsPanel() {
         ))}
 
         {sent.length > 0 && (
-          <div className="pt-2 text-xs text-muted uppercase tracking-wide">Історія</div>
+          <div className="pt-2 text-xs text-muted uppercase tracking-wide">{t("alerts.history")}</div>
         )}
         {sent.map((a) => (
           <div key={a.id} className="flex items-center gap-2 text-sm px-1">
@@ -44,7 +46,7 @@ export function AlertsPanel() {
         ))}
 
         {pending.length === 0 && sent.length === 0 && (
-          <div className="text-center text-muted text-sm py-8">Немає алертів 🎉</div>
+          <div className="text-center text-muted text-sm py-8">{t("alerts.noneCheer")}</div>
         )}
       </CardBody>
     </Card>

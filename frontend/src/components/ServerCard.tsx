@@ -2,7 +2,8 @@ import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { UsageBar } from "@/components/ui/Stat";
 import { type ServerOverview, type SlaResult } from "@/lib/api";
-import { cn, diskColor, timeAgo } from "@/lib/utils";
+import { cn, diskColor } from "@/lib/utils";
+import { useI18n } from "@/i18n";
 import { HardDrive, Server, Clock, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -13,6 +14,7 @@ function slaTone(pct: number): "ok" | "warn" | "crit" {
 }
 
 export function ServerCard({ s, sla }: { s: ServerOverview; sla?: SlaResult }) {
+  const { t, timeAgo } = useI18n();
   const backupTone =
     s.backup.status === "critical" ? "crit"
     : s.backup.status === "warning" ? "warn"
@@ -79,8 +81,10 @@ export function ServerCard({ s, sla }: { s: ServerOverview; sla?: SlaResult }) {
         <div className="mt-auto flex items-center justify-between pt-2 border-t border-border/60 text-xs">
           <div className="flex items-center gap-1.5 flex-wrap">
             <Badge tone={backupTone}>
-              бекап: {s.backup.status ?? "—"}
-              {s.backup.age_hours != null ? ` · ${s.backup.age_hours}г` : ""}
+              {t("server.backup")}: {s.backup.status ?? "—"}
+              {s.backup.age_hours != null
+                ? ` · ${t("common.hoursShort", { n: s.backup.age_hours })}`
+                : ""}
             </Badge>
             {sla != null && (
               <Badge tone={slaTone(sla.uptime_pct)}>
@@ -95,7 +99,7 @@ export function ServerCard({ s, sla }: { s: ServerOverview; sla?: SlaResult }) {
 
         {s.reboot_required && (
           <div className="flex items-center gap-1.5 text-warn text-xs">
-            <AlertTriangle className="w-3.5 h-3.5" /> Очікує перезавантаження
+            <AlertTriangle className="w-3.5 h-3.5" /> {t("server.rebootRequired")}
           </div>
         )}
 

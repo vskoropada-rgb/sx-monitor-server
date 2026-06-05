@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 
-/** Горизонтальний прогрес-бар для CPU/RAM з кольоровим порогом. */
+/** Horizontal CPU/RAM usage bar with colour thresholds. */
+/** Горизонтальний прогрес-бар CPU/RAM з кольоровим порогом. */
 export function UsageBar({
   label,
   value,

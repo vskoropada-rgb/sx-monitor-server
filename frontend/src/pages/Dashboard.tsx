@@ -1,12 +1,15 @@
 import { ServerCard } from "@/components/ServerCard";
 import { AlertsPanel } from "@/components/AlertsPanel";
 import { CommandLog } from "@/components/CommandLog";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import { api } from "@/lib/api";
+import { useI18n } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, LogOut, RefreshCw, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export function Dashboard() {
+  const { t } = useI18n();
   const { data: servers, isLoading, isFetching } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,
@@ -37,7 +40,7 @@ export function Dashboard() {
             <Activity className="w-5 h-5 text-accent" />
             <span className="font-bold">SX Monitor</span>
             <span className="text-sm text-muted ml-2">
-              {onlineCount}/{total} online
+              {t("dashboard.onlineOf", { online: onlineCount, total })}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -50,11 +53,12 @@ export function Dashboard() {
             <RefreshCw
               className={`w-4 h-4 text-muted ${isFetching ? "animate-spin" : ""}`}
             />
+            <LanguageToggle />
             <button
               onClick={logout}
               className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
             >
-              <LogOut className="w-4 h-4" /> Вийти
+              <LogOut className="w-4 h-4" /> {t("common.logout")}
             </button>
           </div>
         </div>
@@ -62,7 +66,7 @@ export function Dashboard() {
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {isLoading ? (
-          <div className="text-center text-muted py-20">Завантаження…</div>
+          <div className="text-center text-muted py-20">{t("common.loading")}</div>
         ) : (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {servers?.map((s) => (

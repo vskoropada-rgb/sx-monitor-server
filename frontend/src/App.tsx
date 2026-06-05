@@ -3,10 +3,12 @@ import { Dashboard } from "@/pages/Dashboard";
 import { Login } from "@/pages/Login";
 import { ServerDetail } from "@/pages/ServerDetail";
 import { SlaPage } from "@/pages/SlaPage";
+import { useI18n } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 function AuthGate() {
+  const { t } = useI18n();
   const { data, isLoading, error } = useQuery({
     queryKey: ["me"],
     queryFn: api.me,
@@ -16,7 +18,7 @@ function AuthGate() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-muted">
-        Завантаження…
+        {t("common.loading")}
       </div>
     );
   }

@@ -3,19 +3,8 @@ import { api } from "@/lib/api";
 import type { LoginLogEntry } from "@/lib/api";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { useI18n } from "@/i18n";
 import { ShieldCheck } from "lucide-react";
-
-function fmtDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleString("uk-UA", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 function shortUA(ua: string | null): string {
   if (!ua) return "—";
@@ -27,6 +16,7 @@ function shortUA(ua: string | null): string {
 }
 
 export function AuthLog() {
+  const { t, tn, fmtDateTime } = useI18n();
   const { data = [] } = useQuery({
     queryKey: ["authLogs"],
     queryFn: api.authLogs,
@@ -37,20 +27,20 @@ export function AuthLog() {
     <Card className="flex flex-col h-full overflow-hidden">
       <CardHeader className="flex items-center gap-2 shrink-0">
         <ShieldCheck className="w-4 h-4 text-accent" />
-        <span className="font-semibold">Журнал авторизацій</span>
-        <span className="ml-auto text-xs text-muted">{data.length} записів</span>
+        <span className="font-semibold">{t("auth.title")}</span>
+        <span className="ml-auto text-xs text-muted">{tn("records", data.length)}</span>
       </CardHeader>
       <CardBody className="overflow-y-auto flex-1 p-0">
         {data.length === 0 ? (
-          <p className="text-sm text-muted px-4 py-3">Входів ще не було</p>
+          <p className="text-sm text-muted px-4 py-3">{t("auth.empty")}</p>
         ) : (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-panel">
               <tr className="text-xs text-muted border-b border-border/60">
-                <th className="text-left px-4 py-2 w-36">Час</th>
-                <th className="text-left px-4 py-2 w-20">Дія</th>
+                <th className="text-left px-4 py-2 w-36">{t("auth.colTime")}</th>
+                <th className="text-left px-4 py-2 w-20">{t("auth.colAction")}</th>
                 <th className="text-left px-4 py-2 w-32">IP</th>
-                <th className="text-left px-4 py-2">Браузер</th>
+                <th className="text-left px-4 py-2">{t("auth.colBrowser")}</th>
                 <th className="text-left px-4 py-2 w-24">Admin ID</th>
               </tr>
             </thead>
@@ -62,7 +52,7 @@ export function AuthLog() {
                   </td>
                   <td className="px-4 py-2">
                     <Badge tone={e.action === "login" ? "ok" : "muted"}>
-                      {e.action === "login" ? "вхід" : "вихід"}
+                      {e.action === "login" ? t("auth.login") : t("auth.logout")}
                     </Badge>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">{e.ip ?? "—"}</td>

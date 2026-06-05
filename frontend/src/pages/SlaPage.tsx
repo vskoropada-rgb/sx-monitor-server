@@ -4,33 +4,15 @@ import { useNavigate } from "react-router-dom";
 import { api, type SlaResult, type ServerOverview } from "@/lib/api";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n";
 import { ArrowLeft, TrendingUp, ChevronDown, ChevronUp } from "lucide-react";
-
-const TZ = "Europe/Kyiv";
 
 function slaTone(pct: number): "ok" | "warn" | "crit" {
   if (pct >= 99.9) return "ok";
   if (pct >= 99.0) return "warn";
   return "crit";
-}
-
-function fmtDowntime(min: number): string {
-  if (min < 60) return `${min} хв`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m > 0 ? `${h}г ${m}хв` : `${h} год`;
-}
-
-function fmtDateTime(iso: string): string {
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleString("uk-UA", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: TZ,
-  });
 }
 
 function uptimePctBar({ pct }: { pct: number }) {
@@ -44,13 +26,8 @@ function uptimePctBar({ pct }: { pct: number }) {
   );
 }
 
-function ServerSlaCard({
-  sla,
-  name,
-}: {
-  sla: SlaResult;
-  name: string;
-}) {
+function ServerSlaCard({ sla, name }: { sla: SlaResult; name: string }) {
+  const { t, tn, fmtDateTime, fmtDowntime } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const tone = slaTone(sla.uptime_pct);
 
@@ -65,7 +42,7 @@ function ServerSlaCard({
             <span className="font-semibold truncate">{name}</span>
             {sla.incidents.length > 0 && (
               <span className="text-xs text-muted">
-                {sla.incidents.length} інц.
+                {tn("incidentsShort", sla.incidents.length)}
               </span>
             )}
           </div>
@@ -83,14 +60,14 @@ function ServerSlaCard({
       <CardBody className="pt-0 space-y-3">
         <div className="flex items-center gap-3 text-xs text-muted">
           <span>
-            Простій:{" "}
+            {t("sla.downtimeLabel")}{" "}
             <span className={sla.downtime_min > 0 ? "text-warn font-medium" : "text-ok font-medium"}>
               {sla.downtime_min > 0 ? fmtDowntime(sla.downtime_min) : "0"}
             </span>
           </span>
           <span>·</span>
           <span>
-            Інциденти:{" "}
+            {t("sla.incidentsLabel")}{" "}
             <span className={sla.incidents.length > 0 ? "text-warn font-medium" : "text-ok font-medium"}>
               {sla.incidents.length}
             </span>
@@ -104,9 +81,9 @@ function ServerSlaCard({
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-muted border-b border-border/60">
-                  <th className="text-left pb-1.5 font-medium w-36">Початок</th>
-                  <th className="text-left pb-1.5 font-medium w-36">Кінець</th>
-                  <th className="text-right pb-1.5 font-medium w-24">Тривалість</th>
+                  <th className="text-left pb-1.5 font-medium w-36">{t("sla.colStart")}</th>
+                  <th className="text-left pb-1.5 font-medium w-36">{t("sla.colEnd")}</th>
+                  <th className="text-right pb-1.5 font-medium w-24">{t("sla.colDuration")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/30">
@@ -130,6 +107,7 @@ function ServerSlaCard({
 
 export function SlaPage() {
   const navigate = useNavigate();
+  const { t, locale } = useI18n();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -153,7 +131,7 @@ export function SlaPage() {
       ? slaList.reduce((s, r) => s + r.uptime_pct, 0) / slaList.length
       : null;
 
-  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("uk-UA", {
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString(locale, {
     month: "long",
     year: "numeric",
   });
@@ -181,22 +159,23 @@ export function SlaPage() {
             className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            Назад
+            {t("common.back")}
           </button>
           <span className="text-border">|</span>
           <TrendingUp className="w-4 h-4 text-accent" />
-          <span className="font-bold">SLA / Uptime</span>
+          <span className="font-bold">{t("sla.pageTitle")}</span>
 
           {avgUptime != null && (
             <Badge tone={slaTone(avgUptime)} className="ml-2">
-              середнє {avgUptime.toFixed(2)}%
+              {t("sla.average", { pct: avgUptime.toFixed(2) })}
             </Badge>
           )}
+          <LanguageToggle className="ml-auto" />
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* Month picker */}
+        {/* Month picker / Вибір місяця */}
         <div className="flex items-center gap-3">
           <button
             onClick={prevMonth}
@@ -217,9 +196,9 @@ export function SlaPage() {
         </div>
 
         {slaLoading ? (
-          <div className="text-center text-muted py-20">Завантаження…</div>
+          <div className="text-center text-muted py-20">{t("common.loading")}</div>
         ) : slaList.length === 0 ? (
-          <div className="text-center text-muted py-20">Немає даних за цей місяць</div>
+          <div className="text-center text-muted py-20">{t("sla.noMonthData")}</div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {slaList.map((r) => (

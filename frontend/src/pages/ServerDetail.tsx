@@ -6,7 +6,9 @@ import type { HistoryPoint, SlaResult, DiskForecast } from "@/lib/api";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { UsageBar } from "@/components/ui/Stat";
-import { cn, diskColor, timeAgo } from "@/lib/utils";
+import { cn, diskColor } from "@/lib/utils";
+import { useI18n, type StringKey } from "@/i18n";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import {
   ArrowLeft,
   Clock,
@@ -50,47 +52,10 @@ function statusTone(s: string): "ok" | "crit" | "accent" | "muted" {
   return "muted";
 }
 
-const TZ = "Europe/Kyiv";
-
-function fmtTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: TZ });
-}
-
-function fmtDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleString("uk-UA", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: TZ,
-  });
-}
-
-function maintenanceTime(iso: string): string {
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
-}
-
-function chartTime(iso: string): string {
-  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
-  return d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
-}
-
 function slaTone(pct: number): "ok" | "warn" | "crit" {
   if (pct >= 99.9) return "ok";
   if (pct >= 99.0) return "warn";
   return "crit";
-}
-
-function fmtDowntime(min: number): string {
-  if (min < 60) return `${min} хв`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m > 0 ? `${h}г ${m}хв` : `${h} год`;
 }
 
 // ── sub-sections ───────────────────────────────────────────────────────────────
@@ -108,37 +73,40 @@ function EmptyNote({ children }: { children: React.ReactNode }) {
 // ── SLA section ───────────────────────────────────────────────────────────────
 
 function SlaSection({ sla }: { sla: SlaResult }) {
-  const now = new Date();
-  const monthLabel = now.toLocaleDateString("uk-UA", { month: "long", year: "numeric", timeZone: TZ });
+  const { t, tn, locale, fmtDateTime, fmtDowntime } = useI18n();
+  const monthLabel = new Date().toLocaleDateString(locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/Kyiv",
+  });
 
   return (
     <Card>
       <CardHeader className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-accent" />
-          <span className="font-semibold">SLA — {monthLabel}</span>
+          <span className="font-semibold">{t("sla.sectionTitle", { month: monthLabel })}</span>
         </div>
-        <Badge tone={slaTone(sla.uptime_pct)}>{sla.uptime_pct}% uptime</Badge>
+        <Badge tone={slaTone(sla.uptime_pct)}>{t("sla.uptimeBadge", { pct: sla.uptime_pct })}</Badge>
       </CardHeader>
       <CardBody className="space-y-3">
         {sla.downtime_min === 0 ? (
-          <p className="text-sm text-ok">Простоїв не зафіксовано</p>
+          <p className="text-sm text-ok">{t("sla.noDowntime")}</p>
         ) : (
           <>
             <p className="text-sm text-muted">
-              Сумарний простій:{" "}
+              {t("sla.totalDowntime")}{" "}
               <span className="text-text font-medium">{fmtDowntime(sla.downtime_min)}</span>
               {" · "}
-              <span className="text-text font-medium">{sla.incidents.length}</span>{" "}
-              {sla.incidents.length === 1 ? "інцидент" : "інциденти(ів)"}
+              <span className="text-text font-medium">{tn("incidents", sla.incidents.length)}</span>
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-muted border-b border-border/60">
-                    <th className="text-left pb-1.5 font-medium w-36">Початок</th>
-                    <th className="text-left pb-1.5 font-medium w-36">Кінець</th>
-                    <th className="text-right pb-1.5 font-medium w-24">Тривалість</th>
+                    <th className="text-left pb-1.5 font-medium w-36">{t("sla.colStart")}</th>
+                    <th className="text-left pb-1.5 font-medium w-36">{t("sla.colEnd")}</th>
+                    <th className="text-right pb-1.5 font-medium w-24">{t("sla.colDuration")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
@@ -162,6 +130,7 @@ function SlaSection({ sla }: { sla: SlaResult }) {
 // ── chart section ──────────────────────────────────────────────────────────────
 
 function MetricsChart({ serverId }: { serverId: string }) {
+  const { t, fmtHm } = useI18n();
   const [hours, setHours] = useState<1 | 4 | 24>(1);
 
   const { data = [], isLoading } = useQuery({
@@ -172,7 +141,7 @@ function MetricsChart({ serverId }: { serverId: string }) {
 
   const chartData = data.map((p: HistoryPoint) => ({
     ...p,
-    label: chartTime(p.time),
+    label: fmtHm(p.time),
   }));
 
   const labelStep = Math.max(1, Math.floor(chartData.length / 8));
@@ -198,7 +167,7 @@ function MetricsChart({ serverId }: { serverId: string }) {
                   : "text-muted hover:text-text"
               )}
             >
-              {h}г
+              {t("common.hoursShort", { n: h })}
             </button>
           ))}
         </div>
@@ -206,10 +175,10 @@ function MetricsChart({ serverId }: { serverId: string }) {
       <CardBody>
         {isLoading ? (
           <div className="h-48 flex items-center justify-center text-muted text-sm">
-            Завантаження…
+            {t("common.loading")}
           </div>
         ) : chartData.length === 0 ? (
-          <EmptyNote>Даних ще немає</EmptyNote>
+          <EmptyNote>{t("chart.noData")}</EmptyNote>
         ) : (
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -288,6 +257,7 @@ function ExportSection({
   };
   diskForecasts?: DiskForecast[];
 }) {
+  const { t, locale, fmtDateTime, fmtDowntime } = useI18n();
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
   const [loading, setLoading] = useState(false);
@@ -448,9 +418,12 @@ function ExportSection({
 
       ctx.fillStyle = "rgba(255,255,255,0.55)";
       ctx.font = "11px Arial";
-      ctx.fillText(`Звітний період: ${from} — ${to}`, M + 20, y + 56);
+      ctx.fillText(t("pdf.reportPeriod", { from, to }), M + 20, y + 56);
       ctx.fillText(
-        `Сформовано: ${new Date().toLocaleString("uk-UA", { timeZone: TZ })}  ·  ${history.length} точок даних`,
+        t("pdf.generated", {
+          datetime: new Date().toLocaleString(locale, { timeZone: "Europe/Kyiv" }),
+          n: history.length,
+        }),
         M + 20, y + 74
       );
       y += HEADER_H + GAP;
@@ -466,25 +439,30 @@ function ExportSection({
 
       const statItems = [
         {
-          label: "Середній CPU",
+          label: t("pdf.avgCpu"),
           value: avgCpu != null ? `${avgCpu.toFixed(1)}%` : "—",
-          sub:   maxCpu != null ? `пік ${maxCpu.toFixed(1)}%` : "",
+          sub:   maxCpu != null ? t("pdf.peak", { pct: maxCpu.toFixed(1) }) : "",
           color: "#06b6d4",
         },
         {
-          label: "Середній RAM",
+          label: t("pdf.avgRam"),
           value: avgRam != null ? `${avgRam.toFixed(1)}%` : "—",
-          sub:   maxRam != null ? `пік ${maxRam.toFixed(1)}%` : "",
+          sub:   maxRam != null ? t("pdf.peak", { pct: maxRam.toFixed(1) }) : "",
           color: "#f97316",
         },
         {
-          label: "SLA / Uptime",
+          label: t("pdf.slaUptime"),
           value: slaData ? `${slaData.uptime_pct}%` : "—",
-          sub:   slaData ? `${slaData.incidents.length} інц. · ${fmtDowntime(slaData.downtime_min)} простою` : "",
+          sub:   slaData
+            ? t("pdf.slaSub", {
+                inc: slaData.incidents.length,
+                dt: fmtDowntime(slaData.downtime_min),
+              })
+            : "",
           color: slaColor,
         },
         {
-          label: "Останній бекап",
+          label: t("pdf.lastBackup"),
           value: backup?.latest_time ? backup.latest_time.split(" ")[0] : "—",
           sub:   backup?.latest_time
             ? `${backup.latest_time.split(" ")[1] ?? ""} · ${backup.latest_size_mb != null ? backup.latest_size_mb + " MB" : ""}`
@@ -528,7 +506,7 @@ function ExportSection({
 
       ctx.fillStyle = "#0f172a";
       ctx.font = "bold 11px Arial";
-      ctx.fillText("CPU та RAM (%)", M + 14, y + 20);
+      ctx.fillText(t("pdf.chartTitle"), M + 14, y + 20);
 
       [
         { color: "#06b6d4", label: "CPU" },
@@ -574,7 +552,7 @@ function ExportSection({
           const d = new Date(pts[i].time.endsWith("Z") ? pts[i].time : pts[i].time + "Z");
           const px = CAX + (i / (pts.length - 1)) * CAW;
           ctx.fillText(
-            d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: TZ }),
+            d.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" }),
             px, CAY + CAH + 14
           );
         }
@@ -593,7 +571,7 @@ function ExportSection({
 
         ctx.fillStyle = "#0f172a";
         ctx.font = "bold 11px Arial";
-        ctx.fillText("SLA поточного місяця", M + 16, y + 18);
+        ctx.fillText(t("pdf.slaCurrentMonth"), M + 16, y + 18);
 
         ctx.fillStyle = slaColor;
         ctx.font = "bold 26px Arial";
@@ -605,7 +583,7 @@ function ExportSection({
         ctx.font = "10px Arial";
         const dtStr = slaData.downtime_min > 0 ? fmtDowntime(slaData.downtime_min) : "0";
         ctx.fillText(
-          `Простій: ${dtStr}  ·  Інциденти: ${slaData.incidents.length}`,
+          t("pdf.downtimeIncidents", { dt: dtStr, n: slaData.incidents.length }),
           M + 16, y + 34
         );
 
@@ -629,7 +607,7 @@ function ExportSection({
       // ── 5. Disks ─────────────────────────────────────────────────────────────
       if (disks.length > 0) {
         card(M, y, CW, DISK_H);
-        secLabel("Стан дисків", M + 14, y + 18);
+        secLabel(t("pdf.disksTitle"), M + 14, y + 18);
         let dy = y + 26;
         disks.slice(0, 6).forEach((d: any) => {
           const freePct: number = d.free_pct ?? 0;
@@ -646,7 +624,7 @@ function ExportSection({
 
           ctx.fillStyle = "#64748b"; ctx.font = "9px Arial"; ctx.textAlign = "right";
           ctx.fillText(
-            `${freePct}% вільно  ·  ${d.free_gb ?? "—"}/${d.total_gb ?? "—"} GB`,
+            t("pdf.freeOf", { pct: freePct, free: d.free_gb ?? "—", total: d.total_gb ?? "—" }),
             M + CW - 8, dy + 13
           );
           ctx.textAlign = "left";
@@ -669,8 +647,8 @@ function ExportSection({
         card(M, y, CW, BACKUP_H);
         secLabel(
           backupLabelInPeriod
-            ? `Резервні копії за звітний період (${backupRows.length})`
-            : `Останні резервні копії (${backupRows.length})`,
+            ? t("pdf.backupsPeriod", { n: backupRows.length })
+            : t("pdf.backupsLatest", { n: backupRows.length }),
           M + 14, y + 18
         );
         let by = y + 26;
@@ -697,7 +675,7 @@ function ExportSection({
       // ── 7. Alerts ─────────────────────────────────────────────────────────
       if (alertRows.length > 0) {
         card(M, y, CW, ALERT_H);
-        secLabel(`Останні алерти (${alertRows.length})`, M + 14, y + 18);
+        secLabel(t("pdf.alertsTitle", { n: alertRows.length }), M + 14, y + 18);
         let ay = y + 26;
         alertRows.forEach((a, i) => {
           ctx.fillStyle = i % 2 === 0 ? "#f8fafc" : "#ffffff";
@@ -725,7 +703,7 @@ function ExportSection({
       ctx.font = "8.5px Arial";
       ctx.textAlign = "center";
       ctx.fillText(
-        `${serverName}  ·  ${from} — ${to}  ·  SX Monitor  ·  ${new Date().toLocaleDateString("uk-UA", { timeZone: TZ })}`,
+        `${serverName}  ·  ${from} — ${to}  ·  SX Monitor  ·  ${new Date().toLocaleDateString(locale, { timeZone: "Europe/Kyiv" })}`,
         PW / 2, y + 22
       );
       ctx.textAlign = "left";
@@ -762,7 +740,7 @@ function ExportSection({
       doc.save(`${serverName}_${from}_${to}.pdf`);
     } catch (e) {
       console.error("PDF export error:", e);
-      alert(`Помилка при генерації PDF: ${e instanceof Error ? e.message : String(e)}`);
+      alert(t("pdf.error", { msg: e instanceof Error ? e.message : String(e) }));
     } finally {
       setLoading(false);
     }
@@ -772,12 +750,12 @@ function ExportSection({
     <Card>
       <CardHeader className="flex items-center gap-2">
         <Download className="w-4 h-4 text-accent" />
-        <span className="font-semibold">Експорт PDF</span>
+        <span className="font-semibold">{t("export.title")}</span>
       </CardHeader>
       <CardBody>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs text-muted">
-            Від
+            {t("export.from")}
             <input
               type="date"
               value={from}
@@ -787,7 +765,7 @@ function ExportSection({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
-            До
+            {t("export.to")}
             <input
               type="date"
               value={to}
@@ -803,7 +781,7 @@ function ExportSection({
             className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-bg text-sm font-medium rounded hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
             <Download className="w-3.5 h-3.5" />
-            {loading ? "Генерація…" : "Завантажити PDF"}
+            {loading ? t("export.generating") : t("export.download")}
           </button>
         </div>
       </CardBody>
@@ -816,6 +794,7 @@ function ExportSection({
 export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t, tn, timeAgo, fmtTime, fmtDateTime, fmtHm } = useI18n();
 
   const { data, isLoading } = useQuery({
     queryKey: ["serverDetail", id],
@@ -848,7 +827,7 @@ export function ServerDetail() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-muted">
-        Завантаження…
+        {t("common.loading")}
       </div>
     );
   }
@@ -856,7 +835,7 @@ export function ServerDetail() {
   if (!data || (data as any).error) {
     return (
       <div className="min-h-screen flex items-center justify-center text-crit">
-        Сервер не знайдено.
+        {t("server.notFound")}
       </div>
     );
   }
@@ -916,7 +895,7 @@ export function ServerDetail() {
             className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            Назад
+            {t("common.back")}
           </button>
 
           <span className="text-border">|</span>
@@ -925,10 +904,10 @@ export function ServerDetail() {
 
           {data.online ? (
             <Badge tone="ok">
-              <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" /> online
+              <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" /> {t("common.online")}
             </Badge>
           ) : (
-            <Badge tone="crit">offline</Badge>
+            <Badge tone="crit">{t("common.offline")}</Badge>
           )}
 
           {data.agent_version && (
@@ -941,22 +920,23 @@ export function ServerDetail() {
             <Clock className="w-3.5 h-3.5" />
             {timeAgo(data.last_seen)}
           </span>
+          <LanguageToggle />
         </div>
       </header>
 
-      {/* ── Maintenance banner ──────────────────────────────────────────────── */}
+      {/* ── Maintenance banner / Банер обслуговування ───────────────────────── */}
       {data.maintenance_until && (
         <div className="bg-warn/10 border-b border-warn/30 text-warn text-sm px-4 py-2 text-center">
-          Обслуговування до {maintenanceTime(data.maintenance_until)}
+          {t("server.maintenanceUntil", { time: fmtHm(data.maintenance_until) })}
         </div>
       )}
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* ── Section 1: Основні метрики ───────────────────────────────────── */}
+        {/* ── Section 1: Key metrics / Основні метрики ─────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-accent" />
-            <span className="font-semibold">Основні метрики</span>
+            <span className="font-semibold">{t("metrics.title")}</span>
           </CardHeader>
           <CardBody>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -964,30 +944,30 @@ export function ServerDetail() {
               <div>
                 <UsageBar label="RAM" value={ram} />
                 {ramFreeGb != null && (
-                  <p className="text-xs text-muted mt-1">Вільно: {ramFreeGb} GB</p>
+                  <p className="text-xs text-muted mt-1">{t("metrics.freeGb", { gb: ramFreeGb })}</p>
                 )}
               </div>
             </div>
             {uptime && (
               <p className="mt-4 text-xs text-muted">
-                Uptime: <span className="text-text font-mono">{uptime}</span>
+                {t("metrics.uptime")}: <span className="text-text font-mono">{uptime}</span>
               </p>
             )}
           </CardBody>
         </Card>
 
-        {/* ── Section 2: Графіки CPU / RAM ─────────────────────────────────── */}
+        {/* ── Section 2: CPU / RAM charts / Графіки CPU / RAM ──────────────── */}
         <MetricsChart serverId={data.id} />
 
-        {/* ── Section 2b: SLA поточного місяця ───────────────────────────── */}
+        {/* ── Section 2b: SLA this month / SLA поточного місяця ────────────── */}
         {slaData && <SlaSection sla={slaData} />}
 
-        {/* ── Section 3: Диски ─────────────────────────────────────────────── */}
+        {/* ── Section 3: Disks / Диски ─────────────────────────────────────── */}
         {disks.length > 0 && (
           <Card>
             <CardHeader className="flex items-center gap-2">
               <HardDrive className="w-4 h-4 text-accent" />
-              <span className="font-semibold">Диски</span>
+              <span className="font-semibold">{t("disks.title")}</span>
             </CardHeader>
             <CardBody className="space-y-3">
               {disks.map((d: any) => {
@@ -1005,7 +985,7 @@ export function ServerDetail() {
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-muted">{d.path}</span>
                       <span className={cn("font-mono", diskColor(freePct))}>
-                        {freePct != null ? `${freePct}% вільно` : "—"} ·{" "}
+                        {freePct != null ? t("disks.freePct", { pct: freePct }) : "—"} ·{" "}
                         {d.free_gb != null ? `${d.free_gb}` : "—"} /{" "}
                         {d.total_gb != null ? `${d.total_gb} GB` : "—"}
                       </span>
@@ -1023,7 +1003,7 @@ export function ServerDetail() {
               {diskForecasts.length > 0 && (
                 <div className="pt-3 mt-1 border-t border-border/40 space-y-1.5">
                   <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">
-                    Прогноз заповнення
+                    {t("disks.forecast")}
                   </p>
                   {diskForecasts.map((f) => (
                     <div key={f.path_key} className="flex items-center justify-between text-xs">
@@ -1039,10 +1019,10 @@ export function ServerDetail() {
                               : "text-ok"
                           )}
                         >
-                          ⏳ заповниться через {f.eta_str}
+                          ⏳ {t("disks.willFill", { eta: f.eta_str ?? "—" })}
                         </span>
                       ) : (
-                        <span className="text-muted">стабільно</span>
+                        <span className="text-muted">{t("disks.stable")}</span>
                       )}
                     </div>
                   ))}
@@ -1052,15 +1032,15 @@ export function ServerDetail() {
           </Card>
         )}
 
-        {/* ── Section 4: Сервіси ───────────────────────────────────────────── */}
+        {/* ── Section 4: Services / Сервіси ────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-accent" />
-            <span className="font-semibold">Сервіси</span>
+            <span className="font-semibold">{t("services.title")}</span>
           </CardHeader>
           <CardBody>
             {services.length === 0 ? (
-              <EmptyNote>немає даних</EmptyNote>
+              <EmptyNote>{t("common.noData")}</EmptyNote>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {services.map((svc: any) => (
@@ -1086,20 +1066,22 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 5: Бекапи ───────────────────────────────────────────── */}
+        {/* ── Section 5: Backups / Бекапи ──────────────────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Database className="w-4 h-4 text-accent" />
-            <span className="font-semibold">Бекапи</span>
+            <span className="font-semibold">{t("backups.title")}</span>
           </CardHeader>
           <CardBody className="space-y-3">
             {backup.status ? (
               <>
-                {/* Статус + останній файл */}
+                {/* Status + latest file / Статус + останній файл */}
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge tone={backupTone}>{backup.status}</Badge>
                   {backup.total_files != null && (
-                    <span className="text-xs text-muted">Всього: {backup.total_files} файл(ів)</span>
+                    <span className="text-xs text-muted">
+                      {t("backups.totalPrefix")} {tn("backupFiles", backup.total_files)}
+                    </span>
                   )}
                   {backup.backup_path && (
                     <span className="font-mono text-xs text-muted truncate max-w-xs">{backup.backup_path}</span>
@@ -1116,16 +1098,16 @@ export function ServerDetail() {
                   </ul>
                 )}
 
-                {/* Список файлів */}
+                {/* File list / Список файлів */}
                 {backup.recent_files.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-muted border-b border-border">
-                          <th className="text-left pb-1.5 font-medium">Файл</th>
-                          <th className="text-right pb-1.5 font-medium w-20">Розмір</th>
-                          <th className="text-right pb-1.5 font-medium w-36">Час</th>
-                          <th className="text-right pb-1.5 font-medium w-20">Вік</th>
+                          <th className="text-left pb-1.5 font-medium">{t("backups.colFile")}</th>
+                          <th className="text-right pb-1.5 font-medium w-20">{t("backups.colSize")}</th>
+                          <th className="text-right pb-1.5 font-medium w-36">{t("backups.colTime")}</th>
+                          <th className="text-right pb-1.5 font-medium w-20">{t("backups.colAge")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
@@ -1134,7 +1116,7 @@ export function ServerDetail() {
                             <td className="py-1.5 pr-2 font-mono truncate max-w-[200px]">{f.name}</td>
                             <td className="py-1.5 text-right">{f.size_mb} MB</td>
                             <td className="py-1.5 text-right font-mono">{f.time}</td>
-                            <td className="py-1.5 text-right">{f.age_hours}г</td>
+                            <td className="py-1.5 text-right">{t("common.hoursShort", { n: f.age_hours })}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1143,7 +1125,7 @@ export function ServerDetail() {
                 ) : (
                   backup.latest_file && (
                     <p className="text-xs text-muted">
-                      Останній: <span className="text-text font-mono">{backup.latest_file}</span>
+                      {t("backups.latest")}: <span className="text-text font-mono">{backup.latest_file}</span>
                       {backup.latest_time && <> — {backup.latest_time}</>}
                       {backup.latest_size_mb != null && <> ({backup.latest_size_mb} MB)</>}
                     </p>
@@ -1151,42 +1133,42 @@ export function ServerDetail() {
                 )}
               </>
             ) : (
-              <EmptyNote>немає даних</EmptyNote>
+              <EmptyNote>{t("common.noData")}</EmptyNote>
             )}
           </CardBody>
         </Card>
 
-        {/* ── Section 6: Безпека ───────────────────────────────────────────── */}
+        {/* ── Section 6: Security / Безпека ────────────────────────────────── */}
         {hasSecurityData && (
           <Card>
             <CardHeader className="flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 text-crit" />
-              <span className="font-semibold">Безпека</span>
+              <span className="font-semibold">{t("security.title")}</span>
             </CardHeader>
             <CardBody className="space-y-4">
               {bruteForce.length > 0 && (
                 <div>
-                  <SectionTitle>Невдалі входи ({bruteForce.length})</SectionTitle>
+                  <SectionTitle>{t("security.failedLogins", { n: bruteForce.length })}</SectionTitle>
                   <ul className="space-y-2">
                     {bruteForce.map((a: any, i: number) => (
                       <li key={i} className="text-xs space-y-0.5">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className={cn("font-mono font-medium", a.is_known_network ? "text-warn" : "text-crit")}>
-                            {a.ip || "локальний"}
+                            {a.ip || t("security.local")}
                           </span>
-                          <span className="text-muted">{a.count} спроб</span>
+                          <span className="text-muted">{tn("attempts", a.count)}</span>
                           {a.is_known_network && (
-                            <Badge tone="warn">внутр. мережа</Badge>
+                            <Badge tone="warn">{t("security.internalNetwork")}</Badge>
                           )}
                         </div>
                         {a.usernames?.length > 0 && (
                           <div className="text-muted pl-1">
-                            Користувач: <span className="text-text font-medium">{a.usernames.join(", ")}</span>
+                            {t("security.userLabel")} <span className="text-text font-medium">{a.usernames.join(", ")}</span>
                           </div>
                         )}
                         {a.workstations?.length > 0 && (
                           <div className="text-muted pl-1">
-                            Пристрій: <span className="text-text font-mono">{a.workstations.join(", ")}</span>
+                            {t("security.deviceLabel")} <span className="text-text font-mono">{a.workstations.join(", ")}</span>
                           </div>
                         )}
                       </li>
@@ -1197,7 +1179,7 @@ export function ServerDetail() {
 
               {newIps.length > 0 && (
                 <div>
-                  <SectionTitle>Нові IP ({newIps.length})</SectionTitle>
+                  <SectionTitle>{t("security.newIps", { n: newIps.length })}</SectionTitle>
                   <ul className="space-y-1">
                     {newIps.map((ip: any, i: number) => (
                       <li key={i} className="text-xs text-warn font-mono">
@@ -1210,7 +1192,7 @@ export function ServerDetail() {
 
               {newAdmins.length > 0 && (
                 <div>
-                  <SectionTitle>Нові адміни ({newAdmins.length})</SectionTitle>
+                  <SectionTitle>{t("security.newAdmins", { n: newAdmins.length })}</SectionTitle>
                   <ul className="space-y-1">
                     {newAdmins.map((a: any, i: number) => (
                       <li key={i} className="text-xs text-warn">
@@ -1223,7 +1205,7 @@ export function ServerDetail() {
 
               {newUsb.length > 0 && (
                 <div>
-                  <SectionTitle>Нові USB ({newUsb.length})</SectionTitle>
+                  <SectionTitle>{t("security.newUsb", { n: newUsb.length })}</SectionTitle>
                   <ul className="space-y-1">
                     {newUsb.map((u: any, i: number) => (
                       <li key={i} className="text-xs text-warn">
@@ -1236,7 +1218,7 @@ export function ServerDetail() {
 
               {blockedIps.length > 0 && (
                 <div>
-                  <SectionTitle>Заблоковані IP ({blockedIps.length})</SectionTitle>
+                  <SectionTitle>{t("security.blockedIps", { n: blockedIps.length })}</SectionTitle>
                   <div className="flex flex-wrap gap-1.5">
                     {blockedIps.map((ip: string, i: number) => (
                       <span
@@ -1253,23 +1235,23 @@ export function ServerDetail() {
           </Card>
         )}
 
-        {/* ── Section 7: RDP Активні сесії ────────────────────────────────── */}
+        {/* ── Section 7: Active RDP sessions / Активні RDP сесії ───────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-accent" />
-            <span className="font-semibold">Активні RDP сесії</span>
+            <span className="font-semibold">{t("rdp.activeTitle")}</span>
           </CardHeader>
           <CardBody>
             {activeSessions.length === 0 ? (
-              <EmptyNote>Немає активних сесій</EmptyNote>
+              <EmptyNote>{t("rdp.noActive")}</EmptyNote>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-muted border-b border-border/60">
-                      <th className="text-left pb-2 pr-4">Користувач</th>
-                      <th className="text-left pb-2 pr-4">Стан</th>
-                      <th className="text-left pb-2">Session ID</th>
+                      <th className="text-left pb-2 pr-4">{t("rdp.colUser")}</th>
+                      <th className="text-left pb-2 pr-4">{t("rdp.colState")}</th>
+                      <th className="text-left pb-2">{t("rdp.colSession")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/30">
@@ -1291,26 +1273,26 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 7b: Журнал RDP входів ───────────────────────────────── */}
+        {/* ── Section 7b: RDP login log / Журнал RDP входів ─────────────────── */}
         <Card>
           <CardHeader className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <History className="w-4 h-4 text-accent" />
-              <span className="font-semibold">Журнал RDP входів</span>
+              <span className="font-semibold">{t("rdp.logTitle")}</span>
             </div>
-            <span className="text-xs text-muted">{rdpLog.length} записів</span>
+            <span className="text-xs text-muted">{tn("records", rdpLog.length)}</span>
           </CardHeader>
           <CardBody className="p-0 max-h-72 overflow-y-auto">
             {rdpLog.length === 0 ? (
-              <p className="text-sm text-muted px-4 py-3">Записів ще немає — з'являться після наступного RDP-входу</p>
+              <p className="text-sm text-muted px-4 py-3">{t("rdp.logEmpty")}</p>
             ) : (
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-panel">
                   <tr className="text-xs text-muted border-b border-border/60">
-                    <th className="text-left px-4 py-2 w-36">Час</th>
-                    <th className="text-left px-4 py-2">Користувач</th>
+                    <th className="text-left px-4 py-2 w-36">{t("rdp.colTime")}</th>
+                    <th className="text-left px-4 py-2">{t("rdp.colUser")}</th>
                     <th className="text-left px-4 py-2">IP</th>
-                    <th className="text-left px-4 py-2 w-20">Новий IP</th>
+                    <th className="text-left px-4 py-2 w-20">{t("rdp.colNewIp")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
@@ -1323,7 +1305,7 @@ export function ServerDetail() {
                       <td className="px-4 py-2 font-mono text-xs">{e.ip ?? "—"}</td>
                       <td className="px-4 py-2">
                         {e.is_new_ip && (
-                          <Badge tone="warn">новий</Badge>
+                          <Badge tone="warn">{t("rdp.newBadge")}</Badge>
                         )}
                       </td>
                     </tr>
@@ -1334,23 +1316,23 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 8: Останні алерти ────────────────────────────────────── */}
+        {/* ── Section 8: Recent alerts / Останні алерти ────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-warn" />
-            <span className="font-semibold">Останні алерти</span>
+            <span className="font-semibold">{t("alerts.recentTitle")}</span>
           </CardHeader>
           <CardBody>
             {recentAlerts.length === 0 ? (
-              <EmptyNote>Алертів немає</EmptyNote>
+              <EmptyNote>{t("alerts.none")}</EmptyNote>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-muted border-b border-border/60">
-                      <th className="text-left pb-2 pr-4 w-24">Час</th>
-                      <th className="text-left pb-2 pr-4 w-24">Рівень</th>
-                      <th className="text-left pb-2">Повідомлення</th>
+                      <th className="text-left pb-2 pr-4 w-24">{t("alerts.colTime")}</th>
+                      <th className="text-left pb-2 pr-4 w-24">{t("alerts.colLevel")}</th>
+                      <th className="text-left pb-2">{t("alerts.colMessage")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/30">
@@ -1372,25 +1354,25 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 9: Журнал команд ─────────────────────────────────────── */}
+        {/* ── Section 9: Command log / Журнал команд ───────────────────────── */}
         <Card>
           <CardHeader className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-accent" />
-            <span className="font-semibold">Журнал команд</span>
+            <span className="font-semibold">{t("commands.title")}</span>
           </CardHeader>
           <CardBody>
             {recentCommands.length === 0 ? (
-              <EmptyNote>Команд ще не було</EmptyNote>
+              <EmptyNote>{t("commands.none")}</EmptyNote>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-muted border-b border-border/60">
-                      <th className="text-left pb-2 pr-4 w-28">Час</th>
-                      <th className="text-left pb-2 pr-4 w-32">Дія</th>
-                      <th className="text-left pb-2 pr-4">Параметри</th>
-                      <th className="text-left pb-2 pr-4 w-24">Статус</th>
-                      <th className="text-left pb-2">Результат</th>
+                      <th className="text-left pb-2 pr-4 w-28">{t("commands.colTime")}</th>
+                      <th className="text-left pb-2 pr-4 w-32">{t("commands.colAction")}</th>
+                      <th className="text-left pb-2 pr-4">{t("commands.colParams")}</th>
+                      <th className="text-left pb-2 pr-4 w-24">{t("commands.colStatus")}</th>
+                      <th className="text-left pb-2">{t("commands.colResult")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/30">
@@ -1404,7 +1386,11 @@ export function ServerDetail() {
                           {c.params ? JSON.stringify(c.params) : "—"}
                         </td>
                         <td className="py-2 pr-4">
-                          <Badge tone={statusTone(c.status)}>{c.status}</Badge>
+                          <Badge tone={statusTone(c.status)}>
+                            {["done", "failed", "executing", "pending"].includes(c.status)
+                              ? t(`cmdStatus.${c.status}` as StringKey)
+                              : c.status}
+                          </Badge>
                         </td>
                         <td className="py-2 text-xs text-muted max-w-[200px] truncate">
                           {c.result ?? "—"}
@@ -1418,7 +1404,7 @@ export function ServerDetail() {
           </CardBody>
         </Card>
 
-        {/* ── Section 10: Експорт PDF ──────────────────────────────────────── */}
+        {/* ── Section 10: PDF export / Експорт PDF ─────────────────────────── */}
         <ExportSection
           serverId={data.id}
           serverName={data.name}

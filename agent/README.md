@@ -9,7 +9,7 @@
 ## Встановлення (на Windows-сервері, PowerShell від адміністратора)
 
 ```powershell
-irm "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/claude/project-migration-EPhSa/agent/install.ps1" | iex
+irm "https://raw.githubusercontent.com/vskoropada-rgb/sx-monitor-server/main/agent/install.ps1" | iex
 ```
 
 Інсталятор завантажить файли і запустить `manage.ps1` (інтерактивне меню).
