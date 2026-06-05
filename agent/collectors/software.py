@@ -1,5 +1,9 @@
 """
-collectors/software.py — виявлення нового встановленого ПЗ через реєстр
+collectors/software.py — detect newly installed software via Windows registry.
+collectors/software.py — виявлення нового встановленого ПЗ через реєстр Windows.
+
+Reads both 64-bit and 32-bit (WOW64) Uninstall keys.
+Читає як 64-bit, так і 32-bit (WOW64) ключі Uninstall.
 """
 import winreg
 import logging
@@ -7,6 +11,8 @@ import storage
 
 logger = logging.getLogger(__name__)
 
+# Registry paths that enumerate installed programs.
+# Шляхи реєстру що перераховують встановлені програми.
 _UNINSTALL_KEYS = [
     (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
     (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
@@ -14,6 +20,8 @@ _UNINSTALL_KEYS = [
 
 
 def _get_installed_software() -> set:
+    """Read all DisplayName values from both Uninstall registry hives.
+    Зчитує всі значення DisplayName з обох кущів реєстру Uninstall."""
     names = set()
     for hive, key_path in _UNINSTALL_KEYS:
         try:
@@ -39,6 +47,8 @@ def _get_installed_software() -> set:
 
 
 def collect(config: dict) -> dict:
+    """Return software titles installed since the last check.
+    Повертає назви ПЗ, встановленого з останньої перевірки."""
     current = _get_installed_software()
     new_software = []
 

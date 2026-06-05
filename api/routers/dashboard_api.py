@@ -1,5 +1,8 @@
 """
-JSON API для React-дашборду. Усе під require_admin (cookie-сесія).
+JSON API for the React dashboard. All endpoints require admin authentication
+(cookie session set by auth.py).
+
+JSON API для React-дашборду. Всі endpoint'и захищені cookie-сесією адміна.
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -15,8 +18,12 @@ import security
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
                    dependencies=[Depends(security.require_admin)])
 
+# Latest known agent version — used to flag outdated agents in the overview.
+# Остання відома версія агента — для позначення застарілих агентів в overview.
 LATEST_AGENT_VERSION = "1.4.1"
 
+# A server is considered online if its last_seen is within this window.
+# Сервер вважається онлайн якщо last_seen в межах цього вікна.
 ONLINE_THRESHOLD = timedelta(minutes=5)
 
 
@@ -28,7 +35,8 @@ def _is_online(last_seen: datetime | None) -> bool:
 
 @router.get("/overview")
 def overview(db: Session = Depends(get_db)):
-    """Картки всіх серверів зі зведеним станом."""
+    """Server cards with aggregated status for the dashboard home page.
+    Картки всіх серверів зі зведеним станом для головної сторінки дашборду."""
     servers = db.query(Server).all()
     snaps = {s.server_id: s.data for s in db.query(MetricsSnapshot).all()}
 
@@ -76,6 +84,8 @@ def overview(db: Session = Depends(get_db)):
 
 @router.get("/servers/{server_id}")
 def server_detail(server_id: str, db: Session = Depends(get_db)):
+    """Full server detail: latest metrics, recent alerts, and recent commands.
+    Повні дані сервера: останні метрики, нещодавні алерти та команди."""
     s = db.query(Server).filter(Server.id == server_id).first()
     if not s:
         return {"error": "not found"}
@@ -132,7 +142,8 @@ def server_detail(server_id: str, db: Session = Depends(get_db)):
 
 @router.get("/alerts")
 def recent_alerts(limit: int = 50, db: Session = Depends(get_db)):
-    """Останні відправлені алерти + накопичені (pending)."""
+    """Recent sent alerts plus accumulated pending ones.
+    Останні відправлені алерти + накопичені (pending)."""
     sent = (
         db.query(Alert)
         .order_by(Alert.sent_at.desc())
@@ -175,7 +186,8 @@ def server_history(
     end: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Повертає часовий ряд CPU і RAM для графіків та PDF-експорту."""
+    """CPU and RAM time series for charts and PDF export.
+    Часовий ряд CPU і RAM для графіків та PDF-експорту."""
     if start and end:
         cutoff = datetime.fromisoformat(start)
         end_dt = datetime.fromisoformat(end)
@@ -183,6 +195,8 @@ def server_history(
         end_dt = datetime.utcnow()
         cutoff = end_dt - timedelta(hours=hours)
 
+    # Cap history at 30 days to prevent runaway queries.
+    # Обмежуємо історію 30 днями щоб уникнути надміру великих запитів.
     max_range = timedelta(days=30)
     if end_dt - cutoff > max_range:
         cutoff = end_dt - max_range
@@ -199,6 +213,8 @@ def server_history(
         .all()
     )
 
+    # Merge cpu and ram rows at the same timestamp into a single dict.
+    # Об'єднуємо рядки cpu і ram з однаковою міткою часу в один dict.
     by_time: dict = {}
     for r in rows:
         t = r.recorded_at.isoformat()
@@ -217,7 +233,8 @@ class AckPayload(BaseModel):
 
 @router.post("/servers/{server_id}/alerts/ack")
 def ack_alert(server_id: str, body: AckPayload, db: Session = Depends(get_db)):
-    """Заглушує алерт на вказану кількість годин."""
+    """Snooze an alert for the specified number of hours.
+    Заглушує алерт на вказану кількість годин."""
     import storage_helpers as sh
     sh.ack_alert(db, server_id, body.alert_key, body.hours)
     return {"ok": True}
@@ -225,6 +242,8 @@ def ack_alert(server_id: str, body: AckPayload, db: Session = Depends(get_db)):
 
 @router.get("/commands")
 def command_log(limit: int = 50, db: Session = Depends(get_db)):
+    """Recent remote commands across all servers.
+    Нещодавні команди по всіх серверах."""
     cmds = (
         db.query(Command)
         .order_by(Command.created_at.desc())
@@ -248,6 +267,8 @@ def command_log(limit: int = 50, db: Session = Depends(get_db)):
 
 @router.get("/servers/{server_id}/rdp-log")
 def rdp_log(server_id: str, limit: int = 200, db: Session = Depends(get_db)):
+    """RDP login history for a server (event_time is stored as UTC).
+    Журнал RDP-входів сервера (event_time зберігається в UTC)."""
     rows = (
         db.query(RdpLog)
         .filter(RdpLog.server_id == server_id)
@@ -268,6 +289,8 @@ def rdp_log(server_id: str, limit: int = 200, db: Session = Depends(get_db)):
 
 @router.get("/auth-logs")
 def auth_logs(limit: int = 100, db: Session = Depends(get_db)):
+    """Dashboard admin login/logout audit trail.
+    Журнал входів і виходів адміністраторів дашборду."""
     rows = (
         db.query(LoginLog)
         .order_by(LoginLog.at.desc())
@@ -287,11 +310,12 @@ def auth_logs(limit: int = 100, db: Session = Depends(get_db)):
     ]
 
 
-# ─── Feature 2: Disk fill ETA ────────────────────────────────────────────────
+# ─── Disk fill forecast ───────────────────────────────────────────────────────
 
 @router.get("/servers/{server_id}/disk-forecast")
 def disk_forecast(server_id: str, db: Session = Depends(get_db)):
-    """Прогноз заповнення дисків методом лінійної регресії (48г даних)."""
+    """Disk fill ETA via linear regression over the last 48 hours of data.
+    Прогноз заповнення дисків методом лінійної регресії (48г даних)."""
     import disk_forecast as _df
     s = db.query(Server).filter(Server.id == server_id).first()
     if not s:
@@ -299,7 +323,7 @@ def disk_forecast(server_id: str, db: Session = Depends(get_db)):
     return _df.get_all_forecasts(db, server_id)
 
 
-# ─── Feature 3: SLA / uptime ─────────────────────────────────────────────────
+# ─── SLA / uptime ─────────────────────────────────────────────────────────────
 
 @router.get("/servers/{server_id}/sla")
 def server_sla(
@@ -308,7 +332,8 @@ def server_sla(
     month: int = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """SLA за вказаний місяць (або поточний, якщо не вказано)."""
+    """SLA for the specified calendar month (defaults to current month).
+    SLA за вказаний місяць (або поточний, якщо не вказано)."""
     import sla as _sla
     s = db.query(Server).filter(Server.id == server_id).first()
     if not s:
@@ -325,7 +350,8 @@ def sla_summary(
     month: int = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """SLA за поточний місяць для всіх серверів."""
+    """Monthly SLA for all servers in a single response.
+    SLA за поточний місяць для всіх серверів в одному запиті."""
     import sla as _sla
     now = datetime.utcnow()
     y = year  if year  else now.year

@@ -1,6 +1,11 @@
 """
-Telegram бот — централізований для всіх серверів.
-Адаптація bot.py з SX_Monitoring під multi-server PostgreSQL.
+Centralised Telegram bot for all monitored servers.
+Handles getUpdates polling, callback button actions, /status and /login commands,
+heartbeat checks, and the weekly SLA report.
+
+Централізований Telegram-бот для всіх серверів.
+Обробляє getUpdates-опитування, callback-кнопки, команди /status і /login,
+heartbeat-перевірки та щотижневий SLA-звіт.
 """
 import io
 import logging
@@ -28,6 +33,8 @@ BASE_URL = f"https://api.telegram.org/bot{settings.tg_bot_token}"
 
 
 def _api(method: str, payload: dict, timeout: int = 10) -> dict:
+    """Make a Telegram Bot API call and return the parsed JSON response.
+    Виконує виклик Telegram Bot API і повертає розпарсену JSON-відповідь."""
     try:
         r = requests.post(f"{BASE_URL}/{method}", json=payload, timeout=timeout)
         return r.json()
@@ -76,6 +83,8 @@ def _send_photo(chat_id: str, topic_id: str, photo_bytes: bytes, caption: str = 
 
 
 def _generate_cpu_ram_chart(server_id: str, hours: int) -> bytes | None:
+    """Render a CPU & RAM line chart as PNG bytes for the given time window.
+    Рендерить графік CPU & RAM у вигляді PNG-байтів для вказаного проміжку."""
     db: Session = SessionLocal()
     try:
         from models import Metric
@@ -158,13 +167,19 @@ def _generate_backup_trend_chart(server_id: str) -> bytes | None:
 
 
 def _get_server_by_callback(data: str) -> tuple[Server | None, str]:
-    """Повертає (server, action) з callback_data типу 'status_company_a'."""
+    """Parse callback_data of the form 'action_server_id' and return (server, action).
+    Розбирає callback_data виду 'action_server_id' і повертає (server, action).
+
+    action may be compound: 'restart_service', 'kill_session', etc. — resolved by
+    matching the longest suffix that equals a known server id.
+    action може бути складеним: 'restart_service', 'kill_session' тощо — знаходимо
+    сервер за суфіксом."""
     parts = data.split("_", 1)
     if len(parts) < 2:
         return None, data
     action, server_id = parts[0], parts[1]
-    # action може бути складеним: 'restart_service', 'kill_session', etc.
-    # Знаходимо сервер по суфіксу
+    # Locate server by matching the callback_data suffix against known server IDs.
+    # Знаходимо сервер по суфіксу callback_data.
     db: Session = SessionLocal()
     try:
         servers = db.query(Server).all()
@@ -178,7 +193,8 @@ def _get_server_by_callback(data: str) -> tuple[Server | None, str]:
 
 
 def _build_config_map(db: Session) -> dict:
-    """Будує {server_id: config_dict} для всіх серверів."""
+    """Build {server_id: config_dict} for all servers (used by heartbeat and SLA reporters).
+    Будує {server_id: config_dict} для всіх серверів (для heartbeat та SLA-звітів)."""
     servers = db.query(Server).all()
     result = {}
     for s in servers:
@@ -200,10 +216,12 @@ def handle_callback(update: dict):
     message_id = msg.get("message_id")
     topic_id   = str(msg.get("message_thread_id", "")) or None
 
+    # Authorisation: only admin IDs may trigger commands via inline buttons.
+    # The bot uses getUpdates and receives updates from any chat or DM —
+    # without this check anyone could reboot / block IPs / update agents.
     # Авторизація: керувати агентами через кнопки можуть лише адміни.
-    # Бот працює на getUpdates і отримує апдейти з будь-якого чату/DM,
-    # тож без цієї перевірки будь-хто міг би тригерити команди (reboot,
-    # update_agent, block_ip тощо) на Windows-серверах.
+    # Бот працює на getUpdates і отримує апдейти з будь-якого чату/DM —
+    # без цієї перевірки будь-хто міг би тригерити команди на серверах.
     user_id = cb.get("from", {}).get("id")
     if not settings.admin_ids or user_id not in settings.admin_ids:
         _api("answerCallbackQuery", {
@@ -215,7 +233,8 @@ def handle_callback(update: dict):
 
     _api("answerCallbackQuery", {"callback_query_id": cb["id"]})
 
-    # ack|server_id|hours|alert_key  — окремий формат, не через _get_server_by_callback
+    # ack|server_id|hours|alert_key — special format parsed directly, not via _get_server_by_callback
+    # ack|server_id|hours|alert_key — окремий формат, парситься напряму
     if data.startswith("ack|"):
         parts = data.split("|", 3)
         if len(parts) == 4:
@@ -614,7 +633,7 @@ def run():
                 except Exception as e:
                     logger.error("handle update error: %s", e)
 
-            # Heartbeat check — раз на хвилину
+            # Heartbeat check — once per minute / раз на хвилину
             now_ts = time.time()
             if now_ts - _last_hb_check >= 60:
                 _last_hb_check = now_ts
@@ -628,11 +647,13 @@ def run():
                 except Exception as e:
                     logger.error("heartbeat check error: %s", e)
 
+                # Weekly SLA report — Monday at 10:00 local time (UTC + offset)
                 # Щотижневий SLA-звіт — у понеділок о 10:00 UTC+offset
                 try:
                     utc_offset = settings.report_utc_offset
                     local_now = datetime.utcnow() + timedelta(hours=utc_offset)
-                    # weekday()==0 — понеділок, hour==10, не надсилали сьогодні
+                    # weekday()==0 → Monday; toordinal guard prevents duplicate sends on the same day
+                    # weekday()==0 — понеділок; toordinal запобігає подвійному надсиланню
                     if (local_now.weekday() == 0
                             and local_now.hour == 10
                             and local_now.toordinal() != _last_sla_report_day):
@@ -641,7 +662,7 @@ def run():
                         try:
                             servers = _sla_db.query(Server).all()
                             cfg_map = _build_config_map(_sla_db)
-                            # Минулий тиждень: пн..нд
+                            # Previous week: Mon–Sun / Минулий тиждень: пн..нд
                             week_end = local_now.replace(
                                 hour=0, minute=0, second=0, microsecond=0
                             )

@@ -1,5 +1,9 @@
 """
-sla.py — розрахунок SLA / uptime по серверу за будь-який проміжок.
+SLA / uptime calculator — computes uptime percentage and incident list
+for any arbitrary time window by replaying UptimeEvent records.
+
+Розрахунок SLA / uptime — обчислює відсоток аптайму та список інцидентів
+для будь-якого проміжку часу за допомогою UptimeEvent-записів.
 """
 import calendar
 from datetime import datetime
@@ -12,7 +16,11 @@ from models import UptimeEvent
 def compute_sla(db: Session, server_id: str,
                 start: datetime, end: datetime) -> dict:
     """
-    Повертає {
+    Compute SLA for the given time window.
+    Розраховує SLA за вказаний проміжок часу.
+
+    Returns / Повертає:
+    {
         "server_id": ...,
         "start": ..., "end": ...,
         "uptime_pct": 99.8,
@@ -42,7 +50,8 @@ def compute_sla(db: Session, server_id: str,
         .all()
     )
 
-    # Стан до початку вікна: дивимось на останню подію перед start
+    # Determine state before the window by looking at the last event before start.
+    # Визначаємо стан до початку вікна: дивимось на останню подію перед start.
     last_before = (
         db.query(UptimeEvent)
         .filter(UptimeEvent.server_id == server_id, UptimeEvent.at < start)
@@ -53,7 +62,8 @@ def compute_sla(db: Session, server_id: str,
     offline_since = None
     if last_before and last_before.event == "offline":
         initial_state = "offline"
-        offline_since = start   # відраховуємо простій від початку вікна
+        offline_since = start   # downtime counted from the start of the window
+                                # простій відраховується від початку вікна
 
     incidents = []
     downtime_sec = 0
@@ -73,7 +83,8 @@ def compute_sla(db: Session, server_id: str,
             offline_since = None
             initial_state = "online"
 
-    # якщо досі offline — вважаємо простій до end
+    # Still offline at window end — count downtime up to `end`.
+    # Досі офлайн — вважаємо простій до кінця вікна.
     if initial_state == "offline" and offline_since:
         duration = (end - offline_since).total_seconds()
         downtime_sec += duration
@@ -95,19 +106,21 @@ def compute_sla(db: Session, server_id: str,
 
 
 def compute_monthly_sla(db: Session, server_id: str, year: int, month: int) -> dict:
-    """Зручний хелпер для місячного SLA."""
+    """Convenience helper for a calendar-month SLA window.
+    Зручний хелпер для місячного SLA-вікна."""
     _, last_day = calendar.monthrange(year, month)
     start = datetime(year, month, 1)
     end   = datetime(year, month, last_day, 23, 59, 59)
     now   = datetime.utcnow()
     if end > now:
-        end = now
+        end = now   # cap at current time for the ongoing month / обмежуємо поточним часом
     return compute_sla(db, server_id, start, end)
 
 
 def compute_weekly_sla(db: Session, server_id: str,
                        week_start: datetime, week_end: datetime) -> dict:
-    """SLA за довільний тижневий проміжок."""
+    """SLA for an arbitrary week-long window.
+    SLA за довільний тижневий проміжок."""
     now = datetime.utcnow()
     if week_end > now:
         week_end = now

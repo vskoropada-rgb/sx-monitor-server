@@ -1,6 +1,9 @@
 """
-notifier.py — відправка повідомлень в Telegram.
-Перенесений з SX_Monitoring, без змін у логіці.
+Telegram notification sender — alerts, daily reports, SLA weekly reports.
+All times are converted to local (Kyiv) before display using report_utc_offset.
+
+Відправка повідомлень у Telegram — алерти, щоденні звіти, тижневий SLA.
+Всі часи перед виводом конвертуються у локальний (Київ) через report_utc_offset.
 """
 import json
 import logging
@@ -11,14 +14,18 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Severity → emoji icon / Серйозність → emoji-іконка
 SEVERITY_ICONS = {"critical": "🔴", "warning": "⚠️", "info": "ℹ️"}
 
 
 def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
+    """Format and send an alert message to the server's Telegram topic.
+    Форматує і відправляє алерт у Telegram-топік сервера."""
     icon    = SEVERITY_ICONS.get(decision.get("severity", "info"), "ℹ️")
     title   = decision.get("title", "Подія на сервері")
     tags    = decision.get("tags", [])
     analysis = decision.get("analysis", "")
+    # Display time in local timezone (UTC + offset) / Час у локальному часовому поясі
     now     = (datetime.utcnow() + timedelta(hours=settings.report_utc_offset)).strftime("%H:%M")
 
     lines = [f"{icon} <b>{title}</b>  {now}"]
@@ -56,6 +63,8 @@ def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
         for s in metrics.get("new_software", [])[:3]:
             lines.append(f"📦 {s.get('name','?')}")
 
+    # For non-security alerts, append the metrics summary block.
+    # Для не-безпекових алертів додаємо блок з метриками.
     is_security = any(t in tags for t in (
         "#brute_force", "#new_ip", "#admin", "#files", "#usb", "#schtask", "#software"
     ))
@@ -70,6 +79,8 @@ def send_alert(decision: dict, metrics: dict, config: dict) -> bool:
 
 def send_daily_report(metrics: dict, config: dict, pending_alerts: list = None,
                       forecasts: list = None) -> bool:
+    """Send the daily summary report to the server's Telegram topic.
+    Надсилає щоденний підсумковий звіт у Telegram-топік сервера."""
     company = config.get("COMPANY_NAME", config.get("SERVER_ID", "Server"))
     now     = datetime.utcnow() + timedelta(hours=settings.report_utc_offset)
 
@@ -136,7 +147,8 @@ def send_daily_report(metrics: dict, config: dict, pending_alerts: list = None,
 
 def send_sla_report(db, config_by_server: dict, servers: list,
                     week_start: datetime, week_end: datetime) -> None:
-    """Надсилає щотижневий SLA-звіт для кожного сервера у відповідний топік."""
+    """Send the weekly SLA report to each server's Telegram topic.
+    Надсилає щотижневий SLA-звіт для кожного сервера у відповідний топік."""
     import sla as _sla
     for server in servers:
         cfg = config_by_server.get(server.id)
@@ -159,6 +171,8 @@ def send_sla_report(db, config_by_server: dict, servers: list,
             if incidents:
                 lines += ["", "📋 <b>Інциденти:</b>"]
                 for inc in incidents[:5]:
+                    # Convert UTC incident times to local display time.
+                    # Конвертуємо UTC час інцидентів у локальний для відображення.
                     from_dt = (datetime.fromisoformat(inc['from'])
                                + timedelta(hours=settings.report_utc_offset))
                     to_dt   = (datetime.fromisoformat(inc['to'])
@@ -175,10 +189,14 @@ def send_sla_report(db, config_by_server: dict, servers: list,
 
 
 def send_message(text: str, config: dict, keyboard=None) -> bool:
+    """Public alias for _send_message — used by heartbeat.py and other modules.
+    Публічний аліас для _send_message — використовується heartbeat.py та іншими модулями."""
     return _send_message(config, text, keyboard)
 
 
 def _metrics_block(metrics: dict) -> str:
+    """Build a compact disk/CPU/RAM summary line for alert messages.
+    Формує компактний рядок зведення диск/CPU/RAM для повідомлень алертів."""
     parts = []
     for d in metrics.get("disks", []):
         if "free_pct" in d:
@@ -193,6 +211,8 @@ def _metrics_block(metrics: dict) -> str:
 
 
 def _ip_geo(ip: str) -> str:
+    """Reverse-geo lookup for an IP address (used in brute-force alerts).
+    Зворотний гео-пошук для IP (використовується в алертах брутфорсу)."""
     try:
         r = requests.get(f"http://ip-api.com/json/{ip}?fields=country,city,status", timeout=2)
         d = r.json()
@@ -204,6 +224,8 @@ def _ip_geo(ip: str) -> str:
 
 
 def _build_keyboard(decision: dict, config: dict, metrics: dict = None) -> dict:
+    """Build an inline keyboard for an alert message based on its tags.
+    Формує inline-клавіатуру для повідомлення алерту на основі його тегів."""
     tags      = decision.get("tags", [])
     server_id = config.get("SERVER_ID", "server")
     metrics   = metrics or {}
@@ -221,6 +243,8 @@ def _build_keyboard(decision: dict, config: dict, metrics: dict = None) -> dict:
     if "#disk" in tags:
         row2.append({"text": "💾 Деталі диску", "callback_data": f"disk_{server_id}"})
 
+    # Collect IPs eligible for one-click blocking.
+    # Збираємо IP для одноклікового блокування.
     block_ips = []
     if "#brute_force" in tags or "#new_ip" in tags or "#security" in tags:
         for a in metrics.get("brute_force_alerts", [])[:3]:
@@ -247,6 +271,8 @@ def _build_keyboard(decision: dict, config: dict, metrics: dict = None) -> dict:
 
 
 def _send_message(config: dict, text: str, keyboard=None) -> bool:
+    """Low-level Telegram sendMessage call.
+    Низькорівневий виклик Telegram sendMessage."""
     token    = config.get("TG_BOT_TOKEN")
     group_id = config.get("TG_GROUP_ID")
     topic_id = config.get("TG_TOPIC_ID")

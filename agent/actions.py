@@ -1,7 +1,11 @@
 """
+actions.py — server-side actions: session management, services, reboot, firewall.
 actions.py — дії на сервері: завершення сесій, сервіси, перезавантаження, firewall.
 
-qwinsta парсер працює з англійським і російським Windows (не залежить від назв колонок).
+The qwinsta parser supports both English and Russian Windows locales
+(does not rely on column header names).
+Парсер qwinsta підтримує англійський і російський Windows
+(не залежить від назв колонок заголовка).
 """
 from __future__ import annotations
 
@@ -11,40 +15,50 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# ─── Константи ───────────────────────────────────────────────
+# ─── Constants / Константи ────────────────────────────────────────────────────
 
+# Firewall rule name prefix used by this tool — allows bulk identification.
+# Префікс назви правила firewall — дозволяє масову ідентифікацію наших правил.
 _FW_RULE_PREFIX = "1C_Monitor_Block_"
 
+# qwinsta state prefixes (en + ru, case-insensitive)
 # Префікси станів qwinsta (en + ru, регістр не важливий)
 _STATE_ACTIVE = ("activ", "акт", "conn", "конн")
 _STATE_DISCONNECTED = ("disc", "откл")
 _STATE_LISTENING = ("listen", "слуш", "lst", "down")
 
-# Псевдо-сесії, які потрібно ігнорувати коли немає юзера
+# Pseudo-sessions to ignore when no username is present.
+# Псевдо-сесії, які ігноруємо коли немає юзера.
 _SYSTEM_SESSION_NAMES = ("services", "rdp-tcp", "console")
 
 
-# ─── qwinsta ─────────────────────────────────────────────────
+# ─── qwinsta parser ───────────────────────────────────────────────────────────
 
 
 def _parse_qwinsta_line(raw: str) -> Optional[dict]:
     """
+    Parse one line of qwinsta output. Returns a dict or None.
     Парсить один рядок виводу qwinsta. Повертає dict або None.
 
-    Стратегія: знаходимо токен з суто цифрами (це ID сесії) і відштовхуємось від нього.
-    Все до ID — session_name + username, все після — state і службові поля.
-    Це працює незалежно від мови заголовка (USERNAME / ПОЛЬЗОВАТЕЛЬ і т.п.).
+    Strategy: locate the first all-digit token (the session ID) and work
+    outward from it. Everything before is session_name + username; everything
+    after is state and ancillary fields. Works regardless of the header locale
+    (USERNAME / ПОЛЬЗОВАТЕЛЬ etc.).
+    Стратегія: знаходимо перший цілочисельний токен (ID сесії) і відштовхуємось
+    від нього. Все до ID — session_name + username, всі після — state. Не залежить
+    від мови заголовка.
     """
     if not raw or not raw.strip():
         return None
 
-    # Прибираємо маркер поточної сесії '>' або провідні пробіли
+    # Strip the current-session marker '>' and leading whitespace.
+    # Прибираємо маркер поточної сесії '>' та провідні пробіли.
     body = raw.lstrip(" >\t")
     tokens = body.split()
     if len(tokens) < 3:
         return None
 
-    # Перший цілочисельний токен — це session ID
+    # First all-digit token is the session ID / Перший цілочисельний токен — ID сесії
     id_idx = next(
         (i for i, t in enumerate(tokens) if t.isdigit()),
         None,
@@ -66,17 +80,22 @@ def _parse_qwinsta_line(raw: str) -> Optional[dict]:
 
 
 def _is_active_state(state: str) -> bool:
+    """True for Active or Disconnected states (user-visible sessions).
+    True для станів Active або Disconnected (бачимі сесії з юзером)."""
     s = state.lower()
     return any(s.startswith(p) for p in _STATE_ACTIVE + _STATE_DISCONNECTED)
 
 
 def _is_listening_state(state: str) -> bool:
+    """True for Listen / template entries that should be skipped.
+    True для Listen / template-записів, які потрібно пропустити."""
     s = state.lower()
     return any(s.startswith(p) for p in _STATE_LISTENING)
 
 
 def get_sessions() -> List[dict]:
-    """Активні RDP/console сесії. Працює з en/ru Windows."""
+    """Return active RDP/console sessions. Works on en/ru Windows.
+    Повертає активні RDP/console сесії. Працює на en/ru Windows."""
     try:
         result = subprocess.run(
             ["qwinsta"],
@@ -93,21 +112,23 @@ def get_sessions() -> List[dict]:
         logger.debug("qwinsta returned no data: %r", result.stdout[:200])
         return sessions
 
-    # Пропускаємо заголовок (lines[0])
+    # Skip the header line (lines[0]) / Пропускаємо заголовок (lines[0])
     for raw in lines[1:]:
         parsed = _parse_qwinsta_line(raw)
         if not parsed:
             continue
 
-        # Ігноруємо listening-templates (rdp-tcp у стані Listen)
+        # Skip Listen templates (rdp-tcp in Listen state).
+        # Ігноруємо listening-templates (rdp-tcp у стані Listen).
         if _is_listening_state(parsed["state"]):
             continue
 
-        # Тільки активні/відключені сесії
+        # Only active/disconnected sessions / Тільки активні/відключені сесії
         if not _is_active_state(parsed["state"]):
             continue
 
-        # Системні сесії без юзера (services з ID=0)
+        # Skip system sessions without a username (services with ID=0).
+        # Пропускаємо системні сесії без юзера (services з ID=0).
         if not parsed["username"] and parsed["session_name"].lower() in _SYSTEM_SESSION_NAMES:
             continue
 
@@ -123,7 +144,8 @@ def get_sessions() -> List[dict]:
 
 
 def kick_session(session_id: str) -> Tuple[bool, str]:
-    """Завершує сесію по ID через logoff."""
+    """Terminate a session by ID using logoff.
+    Завершує сесію по ID через logoff."""
     if not session_id or not session_id.isdigit():
         return False, f"Невірний session_id: {session_id!r}"
     try:
@@ -144,7 +166,8 @@ def kick_session(session_id: str) -> Tuple[bool, str]:
 
 
 def kick_all_sessions() -> Tuple[bool, str]:
-    """Завершує всі активні сесії крім сесії 0 (services)."""
+    """Terminate all active sessions except session 0 (services).
+    Завершує всі активні сесії крім сесії 0 (services)."""
     sessions = get_sessions()
     if not sessions:
         return True, "Активних сесій немає"
@@ -159,11 +182,12 @@ def kick_all_sessions() -> Tuple[bool, str]:
     return True, "\n".join(results) if results else "Немає сесій для завершення"
 
 
-# ─── Сервіси ─────────────────────────────────────────────────
+# ─── Services / Сервіси ───────────────────────────────────────────────────────
 
 
 def _net_command(verb: str, service: str, timeout: int = 30) -> Tuple[int, str]:
-    """net stop|start з повертанням returncode + повідомлення."""
+    """Run 'net stop|start <service>' and return (returncode, message).
+    Запускає 'net stop|start <service>' і повертає (returncode, повідомлення)."""
     try:
         r = subprocess.run(
             ["net", verb, service],
@@ -179,6 +203,8 @@ def _net_command(verb: str, service: str, timeout: int = 30) -> Tuple[int, str]:
 
 
 def restart_service(service_name: str) -> Tuple[bool, str]:
+    """Stop then start a Windows service. Treats 'not started' as a non-error.
+    Зупиняє і запускає сервіс Windows. 'не запущена' не вважається помилкою."""
     import time
     code, msg = _net_command("stop", service_name)
     if code != 0 and "не запущена" not in msg.lower() and "not started" not in msg.lower():
@@ -192,10 +218,12 @@ def restart_service(service_name: str) -> Tuple[bool, str]:
     return False, f"Помилка запуску: {msg}"
 
 
-# ─── Перезавантаження ────────────────────────────────────────
+# ─── Reboot / Перезавантаження ────────────────────────────────────────────────
 
 
 def reboot_server(delay_sec: int = 30) -> Tuple[bool, str]:
+    """Schedule a system reboot with the specified delay.
+    Планує перезавантаження системи із вказаною затримкою."""
     try:
         r = subprocess.run(
             ["shutdown", "/r", "/t", str(delay_sec), "/c",
@@ -209,10 +237,12 @@ def reboot_server(delay_sec: int = 30) -> Tuple[bool, str]:
         return False, str(e)
 
 
-# ─── Firewall ────────────────────────────────────────────────
+# ─── Firewall / Брандмауер ────────────────────────────────────────────────────
 
 
 def block_ip(ip: str) -> Tuple[bool, str]:
+    """Add an inbound block rule for the IP in Windows Advanced Firewall.
+    Додає правило блокування вхідних з'єднань для IP у Windows Firewall."""
     rule_name = f"{_FW_RULE_PREFIX}{ip}"
     try:
         r = subprocess.run(
@@ -233,6 +263,8 @@ def block_ip(ip: str) -> Tuple[bool, str]:
 
 
 def unblock_ip(ip: str) -> Tuple[bool, str]:
+    """Remove the firewall block rule for the IP.
+    Видаляє правило блокування для IP у Firewall."""
     rule_name = f"{_FW_RULE_PREFIX}{ip}"
     try:
         r = subprocess.run(
@@ -252,6 +284,8 @@ def unblock_ip(ip: str) -> Tuple[bool, str]:
 
 
 def list_blocked_ips() -> List[str]:
+    """Return the sorted list of currently blocked IPs from local storage.
+    Повертає відсортований список заблокованих IP з локального сховища."""
     try:
         import storage
         return sorted(storage.get_blocked_ips())
@@ -259,11 +293,12 @@ def list_blocked_ips() -> List[str]:
         return []
 
 
-# ─── Диски ───────────────────────────────────────────────────
+# ─── Disk details / Деталі дисків ────────────────────────────────────────────
 
 
 def get_disk_details(paths: List[str]) -> str:
-    """Текстова детальна інформація по дисках (для бота)"""
+    """Return a formatted text disk detail block (used by the bot).
+    Повертає текстовий блок деталей дисків (для бота)."""
     import psutil
     lines = ["💾 <b>Деталі дисків:</b>"]
     for path in paths:
@@ -283,6 +318,8 @@ def get_disk_details(paths: List[str]) -> str:
 
 
 def _progress_bar(percent: float, length: int = 10) -> str:
+    """Render an emoji progress bar coloured by fill level.
+    Рендерить emoji прогрес-бар з кольором залежно від заповнення."""
     filled = max(0, min(length, int(percent / 100 * length)))
     empty = length - filled
     if percent > 80:
@@ -294,8 +331,10 @@ def _progress_bar(percent: float, length: int = 10) -> str:
     return char * filled + "⬜" * empty
 
 
-# ─── Оновлення агента ─────────────────────────────────────────
+# ─── Agent self-update / Самооновлення агента ─────────────────────────────────
 
+# All files that make up the agent installation.
+# Всі файли, що складають інсталяцію агента.
 _AGENT_FILES = [
     "agent.py", "register_agent.py", "config.py", "storage.py", "actions.py",
     "manage.ps1", "watchdog.ps1", "requirements.txt",
@@ -307,7 +346,8 @@ _AGENT_FILES = [
 
 
 def update_agent(branch: str = "main") -> Tuple[bool, str]:
-    """Завантажує нові файли агента з GitHub і виходить — watchdog перезапустить."""
+    """Download updated agent files from GitHub then exit — watchdog will restart.
+    Завантажує нові файли агента з GitHub і виходить — watchdog перезапустить."""
     import re as _re
     if not _re.match(r'^[a-zA-Z0-9._/-]{1,100}$', branch):
         return False, f"Недозволена назва гілки: {branch!r}"
@@ -340,7 +380,8 @@ def update_agent(branch: str = "main") -> Tuple[bool, str]:
         [sys.executable, agent_path],
         creationflags=getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0),
     )
-    # Повертаємо результат до того як вмерти — report_result встигне відправити статус
+    # Return the result before exiting so report_result can deliver it.
+    # Повертаємо результат до того як вмерти — report_result встигне відправити статус.
     import threading as _th
     _th.Thread(target=lambda: (__import__("time").sleep(5), os._exit(0)),
                daemon=True).start()

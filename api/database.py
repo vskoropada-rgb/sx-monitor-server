@@ -1,3 +1,12 @@
+"""
+Database engine, session factory, and schema initialisation.
+Рушій БД, фабрика сесій і ініціалізація схеми.
+
+All timestamps are stored as naive UTC (TIMESTAMP WITHOUT TIME ZONE).
+The display layer adds the UTC offset or timezone formatting.
+Всі мітки часу зберігаються як naive UTC (TIMESTAMP WITHOUT TIME ZONE).
+Шар відображення додає UTC-зсув або форматування часового поясу.
+"""
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from config import settings
@@ -11,6 +20,8 @@ class Base(DeclarativeBase):
 
 
 def get_db():
+    """FastAPI dependency — yields a DB session and closes it after the request.
+    FastAPI-залежність — видає сесію БД і закриває її після запиту."""
     db = SessionLocal()
     try:
         yield db
@@ -19,9 +30,13 @@ def get_db():
 
 
 def init_db():
+    """Create all tables and run idempotent column migrations on startup.
+    Створює всі таблиці та виконує ідемпотентні міграції колонок при старті."""
     from models import Base as ModelsBase  # noqa: F401 — registers all models
     ModelsBase.metadata.create_all(bind=engine)
-    # Auto-migrate: add columns that may be missing in existing deployments
+
+    # Add columns that may be missing in existing deployments (idempotent).
+    # Додаємо колонки, яких може не бути в існуючих деплоях (ідемпотентно).
     from sqlalchemy import text
     with engine.connect() as conn:
         for stmt in [
@@ -63,11 +78,13 @@ def init_db():
             conn.execute(text(stmt))
         conn.commit()
 
-        # One-time migration: hash any plaintext API keys left from older
-        # deployments. A SHA-256 hex digest is exactly 64 lowercase hex chars;
-        # anything else is a legacy plaintext key and gets hashed in place.
-        # Idempotent — already-hashed keys are skipped, so existing agents keep
-        # authenticating (the server hashes the incoming key before lookup).
+        # One-time migration: hash any plaintext API keys left from older deployments.
+        # A SHA-256 hex digest is exactly 64 lowercase hex chars; anything else is a
+        # legacy plaintext key and gets hashed in place. Idempotent — already-hashed
+        # keys are skipped, so existing agents keep authenticating without changes.
+        # Одноразова міграція: хешуємо plaintext API-ключі зі старих деплоїв.
+        # SHA-256 hex — рівно 64 символи hex у нижньому регістрі; решта — legacy
+        # plaintext і хешується на місці. Ідемпотентно — вже хешовані пропускаються.
         import hashlib
         _hexset = set("0123456789abcdef")
         rows = conn.execute(text("SELECT id, api_key FROM servers")).fetchall()
@@ -75,7 +92,7 @@ def init_db():
             if not key:
                 continue
             if len(key) == 64 and set(key) <= _hexset:
-                continue  # already hashed
+                continue  # already hashed / вже хешований
             digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
             conn.execute(
                 text("UPDATE servers SET api_key = :k WHERE id = :i"),

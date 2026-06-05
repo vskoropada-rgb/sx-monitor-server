@@ -1,6 +1,12 @@
 """
-analyzer.py — перенесений з SX_Monitoring без змін.
-Отримує метрики → повертає рішення про алерт.
+Metric analyzer — decides whether an alert should be sent.
+Аналізатор метрик — вирішує, чи потрібно відправити алерт.
+
+When an OpenAI API key is configured, uses GPT for nuanced decisions.
+Falls back to deterministic rule-based logic when the key is absent or the
+API call fails.
+Коли налаштований ключ OpenAI API, використовує GPT для тонких рішень.
+Якщо ключ відсутній або виклик API не вдався — детермінована логіка правил.
 """
 import json
 from typing import Optional
@@ -29,6 +35,8 @@ SYSTEM_PROMPT = """Ти — експерт з моніторингу Windows с�
 
 
 def analyze(metrics: dict, config: dict) -> Optional[dict]:
+    """Entry point — returns an alert dict or None if nothing is noteworthy.
+    Точка входу — повертає dict алерту або None, якщо немає нічого важливого."""
     if not _has_anything_notable(metrics, config):
         return None
 
@@ -57,10 +65,14 @@ def analyze(metrics: dict, config: dict) -> Optional[dict]:
         result["alert_key"] = stable_key
         return result
     except Exception:
+        # Any failure (network, quota, parse error) falls back to rule engine.
+        # Будь-яка помилка (мережа, квота, парсинг) — детермінована логіка.
         return _fallback_rules(metrics, config, stable_key)
 
 
 def _has_anything_notable(metrics: dict, config: dict) -> bool:
+    """Quick pre-filter — returns True if any metric exceeds its threshold.
+    Швидкий фільтр — True якщо хоча б одна метрика перевищує поріг."""
     if metrics.get("brute_force_alerts"): return True
     if metrics.get("new_ip_alerts"):      return True
     if metrics.get("new_admins"):         return True
@@ -88,6 +100,8 @@ def _has_anything_notable(metrics: dict, config: dict) -> bool:
 
 
 def _stable_alert_key(metrics: dict, config: dict) -> str:
+    """Derive a stable, time-independent alert key for deduplication/cooldown.
+    Отримує стабільний ключ алерту (без часу) для дедуплікації та cooldown."""
     bf = [a for a in metrics.get("brute_force_alerts", []) if a.get("ip")]
     if bf:
         return f"brute_{bf[0]['ip']}"
@@ -113,6 +127,8 @@ def _stable_alert_key(metrics: dict, config: dict) -> str:
         free = d.get("free_pct", 100)
         path = d.get("path", "?").rstrip("\\").replace(":", "")
         if free < warn_pct:
+            # Band quantises free% to suppress noisy re-alerts on minor fluctuations.
+            # Банд квантизує free% щоб не спамити при незначних коливаннях.
             band     = max(0, int(free // 2) * 2)
             severity = "critical" if free < crit_pct else "warning"
             return f"disk_{path}_{severity}_b{band}"
@@ -130,6 +146,8 @@ def _stable_alert_key(metrics: dict, config: dict) -> str:
 
 
 def _build_context(metrics: dict, config: dict) -> str:
+    """Build a Ukrainian-language context string for the OpenAI prompt.
+    Формує україномовний контекст для GPT-промпту."""
     now  = datetime.now()
     hour = now.hour
     time_ctx = ("нічний час" if hour < 7 else "ранок" if hour < 12
@@ -200,6 +218,8 @@ def _build_context(metrics: dict, config: dict) -> str:
 
 
 def _fallback_rules(metrics: dict, config: dict, stable_key: str = None) -> Optional[dict]:
+    """Deterministic rule engine — used when OpenAI is unavailable.
+    Детермінована логіка правил — використовується коли OpenAI недоступний."""
     alerts = []
     warn_pct = float(config.get("DISK_WARNING_PERCENT", 10))
     crit_pct = float(config.get("DISK_CRITICAL_PERCENT", 5))
@@ -257,6 +277,8 @@ def _fallback_rules(metrics: dict, config: dict, stable_key: str = None) -> Opti
     if not alerts:
         return None
 
+    # Prefer the first critical alert; fall back to the first alert of any level.
+    # Обираємо перший critical; якщо немає — перший будь-якого рівня.
     critical = [a for a in alerts if a[0] == "critical"]
     chosen   = critical[0] if critical else alerts[0]
 

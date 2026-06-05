@@ -1,5 +1,11 @@
 """
-POST /api/metrics  — головний endpoint: агент надсилає дані кожну хвилину.
+POST /api/metrics — main ingestion endpoint: agent sends data every 60 seconds.
+Stores numeric time-series, updates the metrics snapshot, persists RDP events,
+and triggers async alert analysis.
+
+POST /api/metrics — головний endpoint прийому метрик: агент надсилає дані кожну хвилину.
+Зберігає числові ряди, оновлює snapshot метрик, зберігає RDP-події
+і запускає фоновий аналіз алертів.
 """
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, BackgroundTasks
@@ -23,16 +29,18 @@ def receive_metrics(
 ):
     now = datetime.utcnow()
 
-    # Оновлюємо last_seen і версію агента
+    # Update last_seen and agent version / Оновлюємо last_seen і версію агента
     server.last_seen = now
     if payload.get("agent_version"):
         server.agent_version = payload["agent_version"]
     db.add(server)
 
-    # Зберігаємо числові метрики для Grafana
+    # Persist numeric time-series for Grafana charts.
+    # Зберігаємо числові метрики для Grafana.
     _save_numeric_metrics(db, server.id, payload, now)
 
-    # Оновлюємо snapshot для швидкого відображення в боті
+    # Upsert the latest snapshot used for fast bot status display.
+    # Upsert останнього snapshot для швидкого відображення в боті.
     stmt = insert(MetricsSnapshot).values(
         server_id=server.id,
         data=payload,
@@ -44,22 +52,27 @@ def receive_metrics(
     db.execute(stmt)
     db.commit()
 
-    # Зберігаємо нові RDP-входи (дедуплікація через UNIQUE constraint)
+    # Persist new RDP login events (duplicates filtered by UNIQUE constraint).
+    # Зберігаємо нові RDP-входи (дублікати відфільтровуються UNIQUE constraint).
     _save_rdp_events(db, server.id, payload.get("recent_logins", []))
 
-    # Аналіз і відправка алертів — у фоні щоб не блокувати агента
+    # Run alert analysis in the background so the agent is not blocked.
+    # Аналіз і відправка алертів — у фоні щоб не блокувати агента.
     background.add_task(_analyze_and_alert, server.id, server.name, payload)
 
     return {"ok": True}
 
 
 def _save_rdp_events(db: Session, server_id: str, logins: list):
+    """Persist RDP login events, converting agent local time to UTC.
+    Зберігає RDP-події, конвертуючи локальний час агента в UTC."""
     for entry in logins:
         time_str = entry.get("time", "")
         if not time_str:
             continue
         try:
-            # Agent sends local time; subtract offset to normalise to UTC for storage
+            # Agent sends local time; subtract offset to normalise to UTC for storage.
+            # Агент надсилає локальний час; віднімаємо offset для нормалізації до UTC.
             event_time = (datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
                           - timedelta(hours=settings.report_utc_offset))
         except ValueError:
@@ -74,10 +87,12 @@ def _save_rdp_events(db: Session, server_id: str, logins: list):
             ))
             db.commit()
         except Exception:
-            db.rollback()   # порушення UNIQUE — дублікат, пропускаємо
+            db.rollback()   # UNIQUE violation — duplicate event, skip / дублікат — пропускаємо
 
 
 def _save_numeric_metrics(db: Session, server_id: str, payload: dict, now: datetime):
+    """Extract and bulk-insert scalar metrics from the payload.
+    Витягує та масово вставляє числові метрики з payload."""
     rows = []
 
     cpu = payload.get("cpu", {})
@@ -94,6 +109,8 @@ def _save_numeric_metrics(db: Session, server_id: str, payload: dict, now: datet
 
     for disk in payload.get("disks", []):
         if "free_pct" in disk:
+            # Normalise the path to a metric name safe key.
+            # Нормалізуємо шлях у ключ для назви метрики.
             path_key = disk["path"].rstrip("\\").replace(":", "").replace("\\", "_")
             rows.append(Metric(server_id=server_id,
                                metric_name=f"disk_free_{path_key}",
@@ -112,7 +129,8 @@ def _save_numeric_metrics(db: Session, server_id: str, payload: dict, now: datet
 
 
 def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
-    """Викликається у фоновому потоці після збереження метрик."""
+    """Background task: run the analyzer and send alerts or accumulate pending ones.
+    Фоновий таск: запускає аналізатор і відправляє алерти або накопичує pending."""
     db = None
     try:
         import analyzer
@@ -124,8 +142,10 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
         if not server:
             return
 
+        # Skip alert analysis during maintenance windows.
+        # Пропускаємо аналіз у режимі обслуговування.
         if server.maintenance_until and server.maintenance_until > datetime.utcnow():
-            return  # in maintenance mode, skip alerts
+            return
 
         from config import settings
         config = {
@@ -147,13 +167,13 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
 
         decision = analyzer.analyze(payload, config)
 
-        # Щоденний звіт — завжди перевіряємо, незалежно від наявності алертів
+        # Daily report — checked on every metric push regardless of alert state.
+        # Щоденний звіт — перевіряємо при кожному push незалежно від наявності алертів.
         utc_offset = int(config.get("REPORT_UTC_OFFSET", 0))
         now = datetime.utcnow() + timedelta(hours=utc_offset)
         if now.hour == int(config["DAILY_REPORT_HOUR"]) and now.minute < 2:
             if storage.can_send_alert(db, server_id, "daily_report", 22 * 60):
                 pending = storage.get_pending_alerts(db, server_id)
-                # Disk fill ETA прогноз
                 try:
                     import disk_forecast as _df
                     forecasts = _df.get_all_forecasts(db, server_id)
@@ -175,11 +195,15 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
             return
 
         if severity == "critical":
+            # Critical alerts fire immediately to Telegram.
+            # Критичні алерти відправляємо одразу в Telegram.
             notifier.send_alert(decision, payload, config)
             storage.record_alert(db, server_id, alert_key,
                                  decision.get("tags", [""])[0], severity,
                                  decision.get("title", ""))
         else:
+            # Non-critical alerts accumulate in the pending queue for the daily report.
+            # Некритичні алерти накопичуються в pending-черзі для щоденного звіту.
             storage.add_pending_alert(db, server_id, alert_key,
                                       decision.get("title", "Подія"),
                                       decision.get("analysis", ""), severity)

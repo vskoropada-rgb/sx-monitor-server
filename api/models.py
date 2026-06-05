@@ -1,3 +1,7 @@
+"""
+SQLAlchemy ORM models — all tables for the monitoring platform.
+SQLAlchemy ORM-моделі — всі таблиці платформи моніторингу.
+"""
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Float, Text, DateTime,
@@ -8,11 +12,13 @@ from database import Base
 
 
 class Server(Base):
+    """Registered monitoring agent (one row per Windows server).
+    Зареєстрований агент моніторингу (один рядок на Windows-сервер)."""
     __tablename__ = "servers"
 
     id                = Column(String, primary_key=True)
     name              = Column(String, nullable=False)
-    api_key           = Column(String, nullable=False, unique=True)
+    api_key           = Column(String, nullable=False, unique=True)  # SHA-256 hex / SHA-256 hex
     tg_topic_id       = Column(String)
     maintenance_until = Column(DateTime, nullable=True)
     agent_version     = Column(String, nullable=True)
@@ -21,6 +27,8 @@ class Server(Base):
 
 
 class Metric(Base):
+    """Time-series numeric metrics (CPU, RAM, disk free %) for Grafana charts.
+    Числові метрики у часі (CPU, RAM, вільний % диску) для графіків Grafana."""
     __tablename__ = "metrics"
     __table_args__ = (
         Index("idx_metrics_server_name_time", "server_id", "metric_name", "recorded_at"),
@@ -35,6 +43,8 @@ class Metric(Base):
 
 
 class Alert(Base):
+    """Sent alert log — used for cooldown deduplication.
+    Журнал відправлених алертів — використовується для дедуплікації за cooldown."""
     __tablename__ = "alerts"
     __table_args__ = (
         Index("idx_alerts_server_key_time", "server_id", "alert_key", "sent_at"),
@@ -47,10 +57,12 @@ class Alert(Base):
     severity    = Column(String, nullable=False)
     message     = Column(Text)
     sent_at     = Column(DateTime, default=datetime.utcnow)
-    acked_until = Column(DateTime, nullable=True)
+    acked_until = Column(DateTime, nullable=True)  # snoozed until / заглушено до
 
 
 class PendingAlert(Base):
+    """Accumulated non-critical alerts, flushed in the daily report.
+    Накопичені некритичні алерти, скидаються у щоденному звіті."""
     __tablename__ = "pending_alerts"
     __table_args__ = (
         UniqueConstraint("server_id", "alert_key", name="uq_pending_server_key"),
@@ -62,12 +74,14 @@ class PendingAlert(Base):
     title     = Column(String, nullable=False)
     body      = Column(Text, default="")
     severity  = Column(String, default="warning")
-    count     = Column(Integer, default=1)
+    count     = Column(Integer, default=1)   # occurrences since last flush / кількість з останнього скидання
     added_at  = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Command(Base):
+    """Remote command queued via Telegram bot, executed by the agent.
+    Команда з Telegram-бота, що виконується агентом на сервері."""
     __tablename__ = "commands"
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
@@ -84,7 +98,8 @@ class Command(Base):
 
 
 class MetricsSnapshot(Base):
-    """Останній знімок метрик кожного сервера — для швидкого відображення статусу в боті."""
+    """Latest metrics snapshot per server — for fast bot status display.
+    Останній знімок метрик кожного сервера — для швидкого відображення статусу в боті."""
     __tablename__ = "metrics_snapshots"
 
     server_id  = Column(String, ForeignKey("servers.id"), primary_key=True)
@@ -93,7 +108,8 @@ class MetricsSnapshot(Base):
 
 
 class KnownEntity(Base):
-    """Відомі IP, USB, ПЗ, задачі, адміни — дедуплікація подій."""
+    """Known IPs, USB devices, software, tasks, admins — event deduplication.
+    Відомі IP, USB, ПЗ, задачі, адміни — дедуплікація подій."""
     __tablename__ = "known_entities"
     __table_args__ = (
         UniqueConstraint("server_id", "entity_type", "value", name="uq_entity"),
@@ -109,7 +125,8 @@ class KnownEntity(Base):
 
 
 class RdpLog(Base):
-    """Журнал RDP-входів з агентів."""
+    """RDP login events received from agents.
+    Журнал RDP-входів з агентів."""
     __tablename__ = "rdp_log"
     __table_args__ = (
         Index("idx_rdp_log_server_time", "server_id", "event_time"),
@@ -120,13 +137,14 @@ class RdpLog(Base):
     server_id  = Column(String, ForeignKey("servers.id"), nullable=False)
     username   = Column(String, nullable=False)
     ip         = Column(String)
-    is_new_ip  = Column(Integer, default=0)   # 0/1
-    event_time = Column(DateTime, nullable=False)
+    is_new_ip  = Column(Integer, default=0)   # 0/1 — first login from this IP / перший вхід з цього IP
+    event_time = Column(DateTime, nullable=False)  # stored as UTC / зберігається в UTC
     logged_at  = Column(DateTime, default=datetime.utcnow)
 
 
 class LoginLog(Base):
-    """Журнал входів і виходів адміністраторів."""
+    """Dashboard administrator login/logout audit log.
+    Журнал входів і виходів адміністраторів дашборду."""
     __tablename__ = "login_logs"
 
     id         = Column(Integer, primary_key=True, autoincrement=True)
@@ -138,10 +156,11 @@ class LoginLog(Base):
 
 
 class AuthToken(Base):
-    """Одноразовий magic-link токен для входу в дашборд через Telegram."""
+    """One-time magic-link token for dashboard login via Telegram.
+    Одноразовий magic-link токен для входу в дашборд через Telegram."""
     __tablename__ = "auth_tokens"
 
-    token      = Column(String, primary_key=True)
+    token      = Column(String, primary_key=True)  # SHA-256 hash / SHA-256 хеш
     admin_id   = Column(Integer, nullable=False)   # Telegram user_id
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
@@ -149,7 +168,8 @@ class AuthToken(Base):
 
 
 class ServerHeartbeat(Base):
-    """Поточний статус онлайн/офлайн кожного сервера — для heartbeat-алертів."""
+    """Current online/offline status per server — for heartbeat alert tracking.
+    Поточний статус онлайн/офлайн кожного сервера — для heartbeat-алертів."""
     __tablename__ = "server_heartbeats"
 
     server_id  = Column(String, ForeignKey("servers.id"), primary_key=True)
@@ -158,7 +178,8 @@ class ServerHeartbeat(Base):
 
 
 class UptimeEvent(Base):
-    """Лог переходів онлайн/офлайн для розрахунку SLA."""
+    """Online/offline transition log for SLA calculation.
+    Лог переходів онлайн/офлайн для розрахунку SLA."""
     __tablename__ = "uptime_events"
     __table_args__ = (
         Index("idx_uptime_server_at", "server_id", "at"),

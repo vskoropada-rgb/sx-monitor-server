@@ -1,6 +1,9 @@
 """
-Хелпери для роботи з PostgreSQL замість SQLite storage.py.
-Зберігають ту саму логіку що була в SX_Monitoring/storage.py.
+PostgreSQL-backed alert storage helpers.
+Alert cooldown, acknowledgement, pending queue, and record operations.
+
+Хелпери для роботи з алертами в PostgreSQL.
+Cooldown алертів, заглушення, черга pending і запис в лог.
 """
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -10,6 +13,8 @@ from models import Alert, PendingAlert
 
 
 def can_send_alert(db: Session, server_id: str, alert_key: str, cooldown_min: int) -> bool:
+    """Return True if the alert is not on cooldown and not snoozed.
+    Повертає True якщо алерт не на cooldown і не заглушений."""
     row = (
         db.query(Alert)
         .filter(Alert.server_id == server_id, Alert.alert_key == alert_key)
@@ -19,12 +24,13 @@ def can_send_alert(db: Session, server_id: str, alert_key: str, cooldown_min: in
     if not row:
         return True
     if row.acked_until and row.acked_until > datetime.utcnow():
-        return False
+        return False   # snoozed by admin / заглушено адміном
     return datetime.utcnow() - row.sent_at > timedelta(minutes=cooldown_min)
 
 
 def ack_alert(db: Session, server_id: str, alert_key: str, hours: int):
-    """Заглушує алерт на вказану кількість годин."""
+    """Snooze an alert for the specified number of hours.
+    Заглушує алерт на вказану кількість годин."""
     row = (
         db.query(Alert)
         .filter(Alert.server_id == server_id, Alert.alert_key == alert_key)
@@ -35,6 +41,8 @@ def ack_alert(db: Session, server_id: str, alert_key: str, hours: int):
     if row:
         row.acked_until = until
     else:
+        # Create a placeholder row if the alert was never recorded (edge case).
+        # Створюємо placeholder якщо алерт ніколи не записувався (крайній випадок).
         db.add(Alert(
             server_id=server_id,
             alert_key=alert_key,
@@ -48,6 +56,8 @@ def ack_alert(db: Session, server_id: str, alert_key: str, hours: int):
 
 def record_alert(db: Session, server_id: str, alert_key: str,
                  alert_type: str, severity: str, message: str):
+    """Append an alert record (used for cooldown tracking and history).
+    Додає запис алерту (для відстеження cooldown і історії)."""
     db.add(Alert(
         server_id=server_id,
         alert_key=alert_key,
@@ -60,6 +70,8 @@ def record_alert(db: Session, server_id: str, alert_key: str,
 
 def add_pending_alert(db: Session, server_id: str, alert_key: str,
                       title: str, body: str, severity: str):
+    """Upsert a pending (non-critical) alert, incrementing the occurrence count.
+    Upsert pending (некритичного) алерту, збільшуючи лічильник повторень."""
     stmt = insert(PendingAlert).values(
         server_id=server_id,
         alert_key=alert_key,
@@ -80,6 +92,8 @@ def add_pending_alert(db: Session, server_id: str, alert_key: str,
 
 
 def get_pending_alerts(db: Session, server_id: str) -> list:
+    """Return pending alerts ordered by severity (critical first).
+    Повертає pending-алерти відсортовані за серйозністю (critical першими)."""
     sev_order = {"critical": 0, "warning": 1, "info": 2}
     rows = (
         db.query(PendingAlert)
@@ -97,5 +111,7 @@ def get_pending_alerts(db: Session, server_id: str) -> list:
 
 
 def clear_pending_alerts(db: Session, server_id: str):
+    """Delete all pending alerts for a server (called after the daily report).
+    Видаляє всі pending-алерти сервера (викликається після щоденного звіту)."""
     db.query(PendingAlert).filter(PendingAlert.server_id == server_id).delete()
     db.commit()

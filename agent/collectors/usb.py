@@ -1,5 +1,6 @@
 """
-collectors/usb.py — моніторинг нових USB-пристроїв
+collectors/usb.py — detect newly connected USB storage devices via PowerShell Get-PnpDevice.
+collectors/usb.py — виявлення нових USB-пристроїв через PowerShell Get-PnpDevice.
 """
 import subprocess
 import json
@@ -10,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_usb_devices() -> list:
+    """Query PnP devices of class USB/DiskDrive/USBSTOR with status OK.
+    Запитує PnP-пристрої класу USB/DiskDrive/USBSTOR зі статусом OK."""
     cmd = (
         "Get-PnpDevice | "
         "Where-Object { $_.Class -in @('USB','DiskDrive','USBSTOR') -and $_.Status -eq 'OK' } | "
@@ -25,6 +28,8 @@ def _get_usb_devices() -> list:
             return []
         raw = result.stdout.strip()
         data = json.loads(raw)
+        # PowerShell returns a dict (not a list) when there is a single result.
+        # PowerShell повертає dict (не list) коли є лише один результат.
         return [data] if isinstance(data, dict) else data
     except Exception as e:
         logger.debug("USB device query error: %s", e)
@@ -32,6 +37,8 @@ def _get_usb_devices() -> list:
 
 
 def collect(config: dict) -> dict:
+    """Return newly detected USB devices (seen for the first time this session).
+    Повертає нові USB-пристрої (виявлені вперше)."""
     devices = _get_usb_devices()
     new_devices = []
 

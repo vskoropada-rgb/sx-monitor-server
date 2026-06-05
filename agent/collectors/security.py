@@ -1,5 +1,7 @@
 """
-collectors/security.py — безпека: перебір паролів, нові адміни, зміни файлів
+collectors/security.py — security monitoring: brute-force detection, new admins,
+file integrity checks.
+collectors/security.py — безпека: перебір паролів, нові адміни, зміни файлів.
 """
 import logging
 import re
@@ -17,11 +19,14 @@ from storage import (get_known_admins, add_known_admin,
 logger = logging.getLogger(__name__)
 
 _IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+# IPs that should never be treated as attacker addresses.
+# IP-адреси, які ніколи не слід вважати адресами атакуючих.
 _BAD_IPS = {"-", "", "::1", "127.0.0.1", "0.0.0.0"}
 
 
 def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
-    """Читає події з Windows Event Log за останні N хвилин"""
+    """Read events from the Windows Event Log for the last N minutes.
+    Читає події з Windows Event Log за останні N хвилин."""
     events = []
     try:
         hand = win32evtlog.OpenEventLog(None, source)
@@ -49,8 +54,10 @@ def _get_events(source: str, event_ids: list, minutes: int = 10) -> list:
 
 
 def _extract_ip_from_strings(strings: list, event_id: int) -> str:
-    """Вилучає IP з StringInserts різних типів подій.
+    """Extract an IP address from StringInserts for various event types.
+    Вилучає IP з StringInserts різних типів подій.
 
+    Checks known field indices first, then scans all fields as a fallback.
     Спочатку перевіряє відомі індекси, потім сканує всі поля як fallback.
     """
     if not strings:
@@ -66,16 +73,17 @@ def _extract_ip_from_strings(strings: list, event_id: int) -> str:
             if idx < len(strings) and strings[idx]:
                 candidates.append(_clean(strings[idx]))
     elif event_id == 4771:
-        # Field 6 = Client Address (може бути ::ffff:1.2.3.4)
+        # Field 6 = Client Address (may be ::ffff:1.2.3.4)
         if len(strings) > 6 and strings[6]:
             candidates.append(_clean(strings[6]))
 
-    # Перевіряємо відомі індекси першими
+    # Prefer the known-index candidates / Перевіряємо відомі індекси першими
     for c in candidates:
         if c and c not in _BAD_IPS and _IP_RE.match(c):
             return c
 
-    # Fallback: скануємо всі StringInserts в пошуку будь-якого публічного IP
+    # Fallback: scan all StringInserts for any public IP.
+    # Fallback: сканує всі StringInserts в пошуку будь-якого публічного IP.
     for s in strings:
         if not s:
             continue
@@ -85,7 +93,8 @@ def _extract_ip_from_strings(strings: list, event_id: int) -> str:
                          [str(x)[:30] if x else None for x in strings])
             return c
 
-    # Останній шанс — перший кандидат без перевірки формату
+    # Last resort — first candidate without IP format check.
+    # Останній шанс — перший кандидат без перевірки формату.
     if candidates:
         c = candidates[0]
         if c and c not in _BAD_IPS:
@@ -95,7 +104,8 @@ def _extract_ip_from_strings(strings: list, event_id: int) -> str:
 
 
 def collect_brute_force(config: dict) -> dict:
-    """Event ID 4625 (NTLM) + 4771 (Kerberos) — невдалі спроби входу."""
+    """Detect password brute-force via Event IDs 4625 (NTLM) + 4771 (Kerberos).
+    Виявляє перебір паролів через Event ID 4625 (NTLM) + 4771 (Kerberos)."""
     window_min = int(config.get("BRUTE_FORCE_WINDOW_MIN", 10))
     threshold = int(config.get("BRUTE_FORCE_THRESHOLD", 5))
     local_threshold = int(config.get("BRUTE_FORCE_LOCAL_THRESHOLD", 20))
@@ -110,7 +120,7 @@ def collect_brute_force(config: dict) -> dict:
 
     events = _get_events("Security", [4625, 4771], minutes=window_min)
     ip_attempts    = defaultdict(list)
-    ip_workstations = defaultdict(set)  # ip → назви пристроїв
+    ip_workstations = defaultdict(set)  # ip → workstation names / ip → назви пристроїв
 
     for rec in events:
         try:
@@ -135,8 +145,8 @@ def collect_brute_force(config: dict) -> dict:
                 {ip: len(u) for ip, u in ip_attempts.items()})
 
     alerts = []
-    suspicious_ips = []  # лише реальні IP (для кнопки блокування)
-    local_failed = 0     # кількість локальних невдалих спроб (без IP)
+    suspicious_ips = []  # real external IPs only (for block button) / лише реальні зовнішні IP
+    local_failed = 0     # local logins without IP / локальні входи без IP
 
     for ip, users in ip_attempts.items():
         count = len(users)
@@ -144,14 +154,15 @@ def collect_brute_force(config: dict) -> dict:
 
         if not real_ip:
             local_failed += count
-            # Локальні логіни — алерт тільки при дуже великій кількості
+            # Local logins — alert only at very high counts (service accounts, domain auth).
+            # Локальні логіни — алерт тільки при дуже великій кількості (сервісні акаунти).
             if count >= local_threshold:
                 alerts.append({
                     "ip": "",
                     "count": count,
                     "usernames": list(dict.fromkeys(users))[:5],
                     "workstations": [],
-                    "is_known_network": True,  # не блокуємо, не зовнішній IP
+                    "is_known_network": True,  # not blockable — no external IP / не блокуємо
                 })
             continue
 
@@ -173,7 +184,8 @@ def collect_brute_force(config: dict) -> dict:
         if count >= threshold:
             alerts.append(entry)
 
-        # До кнопки блокування — лише реальні зовнішні IP
+        # Block-button candidates: real external IPs only.
+        # Кандидати для блокування: лише реальні зовнішні IP.
         if not is_known:
             suspicious_ips.append(entry)
 
@@ -190,7 +202,8 @@ def collect_brute_force(config: dict) -> dict:
 
 
 def collect_new_admins(config: dict) -> dict:
-    """Event ID 4732 — додавання до групи Administrators"""
+    """Detect additions to the Administrators group via Event ID 4732.
+    Виявляє додавання до групи Administrators через Event ID 4732."""
     events = _get_events("Security", [4732], minutes=int(config.get("CHECK_INTERVAL_SEC", 60)) // 60 + 1)
     known = get_known_admins()
     new_admins = []
@@ -215,7 +228,8 @@ def collect_new_admins(config: dict) -> dict:
         except Exception:
             pass
 
-    # Також перевіряємо поточних адмінів при першому запуску
+    # Bootstrap known admins on the very first run to avoid false-positive alerts.
+    # Ініціалізуємо відомих адмінів при першому запуску щоб уникнути хибних алертів.
     if not known:
         _bootstrap_known_admins()
 
@@ -224,9 +238,13 @@ def collect_new_admins(config: dict) -> dict:
 
 def _bootstrap_known_admins() -> None:
     """
-    На першому запуску додаємо поточних адмінів у "відомі" щоб уникнути
-    false-positive алертів. Парсимо `net localgroup Administrators` обережно —
-    пропускаємо заголовки, рамки і службові рядки на en/ru локалях.
+    On first run, seed the known-admins table from 'net localgroup Administrators'
+    to prevent false-positive new-admin alerts. Parses en/ru Windows output
+    carefully — skips headers, separators, and system lines.
+
+    При першому запуску наповнює таблицю відомих адмінів з
+    'net localgroup Administrators' щоб уникнути false-positive алертів.
+    Обережно парсить en/ru вивід — пропускає заголовки, рамки, службові рядки.
     """
     import subprocess
     try:
@@ -235,7 +253,8 @@ def _bootstrap_known_admins() -> None:
             capture_output=True, text=True, encoding="cp866", timeout=15,
         )
     except Exception as e:
-        # Російська локаль може мати іншу назву групи
+        # Russian locale may use a different group name.
+        # Російська локаль може мати іншу назву групи.
         try:
             result = subprocess.run(
                 ["net", "localgroup", "Администраторы"],
@@ -263,7 +282,8 @@ def _bootstrap_known_admins() -> None:
         if any(kw in low for kw in _SKIP_KEYWORDS):
             continue
 
-        # Доменні записи: "BUILTIN\Administrators" — беремо лише після останнього '\'
+        # Domain entries: "BUILTIN\Administrators" — take only the part after the last backslash.
+        # Доменні записи: "BUILTIN\Administrators" — беремо лише після останнього '\'.
         if "\\" in line:
             line = line.rsplit("\\", 1)[-1]
 
@@ -272,7 +292,8 @@ def _bootstrap_known_admins() -> None:
 
 
 def collect_file_changes(config: dict) -> dict:
-    """Перевіряє хеші критичних файлів"""
+    """Compare SHA-256 hashes of watched files to detect modifications.
+    Порівнює SHA-256 хеші відслідковуваних файлів для виявлення змін."""
     watch_files = [f.strip() for f in config.get(
         "WATCH_FILES",
         r"C:\Windows\System32\drivers\etc\hosts"
@@ -290,7 +311,8 @@ def collect_file_changes(config: dict) -> dict:
             stored_hash = get_file_hash(file_path)
 
             if stored_hash is None:
-                # Перший запуск — запам'ятовуємо
+                # First run — record baseline hash. No alert.
+                # Перший запуск — записуємо еталонний хеш. Без алерту.
                 update_file_hash(file_path, current_hash)
             elif stored_hash != current_hash:
                 changed_files.append({
@@ -303,13 +325,15 @@ def collect_file_changes(config: dict) -> dict:
                     ).strftime("%Y-%m-%d %H:%M:%S"),
                 })
                 update_file_hash(file_path, current_hash)
-        except Exception as e:
+        except Exception:
             pass
 
     return {"changed_files": changed_files}
 
 
 def collect(config: dict) -> dict:
+    """Run all security sub-collectors and merge results.
+    Запускає всі підзбирачі безпеки і об'єднує результати."""
     result = {}
     result.update(collect_brute_force(config))
     result.update(collect_new_admins(config))

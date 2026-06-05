@@ -1,5 +1,14 @@
 """
-collectors/rdp.py — моніторинг RDP сесій + нові IP через Event Log
+collectors/rdp.py — RDP session monitoring and new-IP detection via Windows Event Log.
+collectors/rdp.py — моніторинг RDP-сесій та виявлення нових IP через Windows Event Log.
+
+Active sessions are read via qwinsta (delegated to actions.py).
+Active IPs are mapped via netstat (port 3389 ESTABLISHED connections).
+Recent RDP logins come from Event Log ID 4624 (LogonType=10).
+
+Активні сесії зчитуються через qwinsta (делеговано до actions.py).
+Активні IP маппуються через netstat (ESTABLISHED з'єднання на порт 3389).
+Нещодавні RDP-входи — з Event Log ID 4624 (LogonType=10).
 """
 from __future__ import annotations
 
@@ -15,12 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_active_sessions() -> List[dict]:
-    """Активні RDP-сесії через qwinsta (використовує parser з actions.py)."""
+    """Active RDP sessions via qwinsta (uses the parser from actions.py).
+    Активні RDP-сесії через qwinsta (використовує parser з actions.py)."""
     return actions.get_sessions()
 
 
 def get_session_ips() -> dict:
-    """Мапа IP→True для встановлених підключень на порт 3389 (netstat)."""
+    """Map IP → True for established connections on port 3389 (via netstat).
+    Мапа IP→True для встановлених підключень на порт 3389 (netstat)."""
     ips: dict = {}
     try:
         result = subprocess.run(
@@ -46,7 +57,12 @@ def get_session_ips() -> dict:
 
 
 def get_recent_rdp_logins(minutes: int = 60) -> List[dict]:
-    """Event ID 4624 LogonType=10 — успішні RDP-входи за останні N хвилин."""
+    """Read Event ID 4624 LogonType=10 (successful RDP logins) for the last N minutes.
+    Читає Event ID 4624 LogonType=10 — успішні RDP-входи за останні N хвилин.
+
+    Note: TimeGenerated returns local Windows time, not UTC.
+    Примітка: TimeGenerated повертає локальний час Windows, не UTC.
+    """
     try:
         import win32evtlog
     except ImportError:
@@ -71,12 +87,14 @@ def get_recent_rdp_logins(minutes: int = 60) -> List[dict]:
                 try:
                     event_time = datetime(*rec.TimeGenerated.timetuple()[:6])
                     if event_time < cutoff:
-                        return logins  # читали з кінця, далі тільки старіші
+                        return logins  # reading backwards — older records follow
+                                       # читаємо з кінця — далі тільки старіші
                     if (rec.EventID & 0xFFFF) != 4624:
                         continue
 
                     strings = rec.StringInserts or []
-                    # LogonType — індекс 8 (стандартний layout 4624)
+                    # LogonType is at index 8 in the standard 4624 event layout.
+                    # LogonType — індекс 8 у стандартному layout події 4624.
                     if len(strings) <= 8:
                         continue
                     logon_type = (strings[8] or "").strip()
@@ -109,8 +127,12 @@ def get_recent_rdp_logins(minutes: int = 60) -> List[dict]:
 
 
 def collect(config: dict) -> dict:
+    """Collect all RDP metrics: active sessions, recent logins, new-IP alerts.
+    Збирає всі RDP-метрики: активні сесії, нещодавні входи, алерти нових IP."""
     active = get_active_sessions()
     ips = get_session_ips()
+    # Extend the lookback window slightly beyond the poll interval to avoid gaps.
+    # Розширюємо вікно перегляду трохи більше за інтервал опитування щоб не пропустити події.
     minutes = max(2, int(config.get("CHECK_INTERVAL_SEC", 60)) // 60 + 2)
     recent = get_recent_rdp_logins(minutes=minutes)
 
