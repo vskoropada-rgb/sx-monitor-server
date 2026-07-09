@@ -142,6 +142,34 @@ class RdpLog(Base):
     logged_at  = Column(DateTime, default=datetime.utcnow)
 
 
+class RdpSession(Base):
+    """Paired RDP logon/logoff — one row per user session.
+    Спарена пара вхід/вихід RDP — один рядок на сесію користувача.
+
+    A logon (4624) opens the row; the matching logoff (4634/4647), tied by
+    logon_id, closes it and fills logoff_time + duration_sec. An open row
+    (logoff_time is NULL) means the session is still active.
+    Вхід (4624) відкриває рядок; відповідний вихід (4634/4647), зв'язаний
+    через logon_id, закриває його і заповнює logoff_time + duration_sec.
+    Відкритий рядок (logoff_time = NULL) — сесія ще активна.
+    """
+    __tablename__ = "rdp_sessions"
+    __table_args__ = (
+        Index("idx_rdp_sessions_server_logon", "server_id", "logon_time"),
+        UniqueConstraint("server_id", "logon_id", name="uq_rdp_session"),
+    )
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    server_id    = Column(String, ForeignKey("servers.id"), nullable=False)
+    logon_id     = Column(String, nullable=False)   # Windows TargetLogonId — pairing key
+    username     = Column(String, nullable=False)
+    ip           = Column(String)
+    logon_time   = Column(DateTime, nullable=False)  # stored as UTC / зберігається в UTC
+    logoff_time  = Column(DateTime)                  # UTC; NULL = still active / ще активна
+    duration_sec = Column(Integer)                   # filled on logoff / заповнюється при виході
+    logged_at    = Column(DateTime, default=datetime.utcnow)
+
+
 class LoginLog(Base):
     """Dashboard administrator login/logout audit log.
     Журнал входів і виходів адміністраторів дашборду."""

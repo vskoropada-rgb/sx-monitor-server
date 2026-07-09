@@ -268,6 +268,14 @@ def handle_callback(update: dict):
         _handle_status(chat_id, topic_id, message_id, server, metrics)
     elif action == "sessions":
         _handle_sessions(chat_id, topic_id, message_id, server, metrics)
+    elif action == "sessreport":
+        _handle_sessions_report_menu(chat_id, topic_id, message_id, server)
+    elif action.startswith("sessreport_"):
+        try:
+            days = int(action.split("_")[1])
+        except (IndexError, ValueError):
+            days = 7
+        _handle_sessions_report(chat_id, topic_id, message_id, server, days)
     elif action == "disk":
         _handle_disk(chat_id, topic_id, message_id, server, metrics)
     elif action == "restart_service":
@@ -431,8 +439,11 @@ def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict)
 
 def _handle_sessions(chat_id, topic_id, message_id, server: Server, metrics: dict):
     sessions = metrics.get("active_sessions", [])
+    report_btn = {"text": "📋 Звіт за період", "callback_data": f"sessreport_{server.id}"}
+
     if not sessions:
-        _send(chat_id, "👥 Активних сесій немає", topic_id, message_id=message_id)
+        _send(chat_id, "👥 Активних сесій немає", topic_id,
+              {"inline_keyboard": [[report_btn]]}, message_id)
         return
 
     lines = [f"👥 <b>Сесії — {server.name}</b>", ""]
@@ -444,7 +455,77 @@ def _handle_sessions(chat_id, topic_id, message_id, server: Server, metrics: dic
               "callback_data": f"kill_confirm_{s.get('session_id', '0')}_{server.id}"}]
             for s in sessions[:5]]
     btns.append([{"text": "🚫 Завершити всіх", "callback_data": f"kill_confirm_all_{server.id}"}])
+    btns.append([report_btn])
     _send(chat_id, "\n".join(lines), topic_id, {"inline_keyboard": btns}, message_id)
+
+
+def _fmt_session_dur(sec) -> str:
+    """Format a session duration (seconds) for the Telegram report.
+    Форматує тривалість сесії (секунди) для звіту в Telegram."""
+    if sec is None:
+        return "—"
+    if sec < 60:
+        return f"{sec}с"
+    minutes = sec // 60
+    h, m = minutes // 60, minutes % 60
+    if h == 0:
+        return f"{m}хв"
+    return f"{h}г {m}хв" if m else f"{h}г"
+
+
+def _handle_sessions_report_menu(chat_id, topic_id, message_id, server: Server):
+    """Show the period picker for the user-sessions report.
+    Показує вибір періоду для звіту сесій користувачів."""
+    kb = {"inline_keyboard": [
+        [
+            {"text": "Сьогодні", "callback_data": f"sessreport_1_{server.id}"},
+            {"text": "7 днів",   "callback_data": f"sessreport_7_{server.id}"},
+            {"text": "30 днів",  "callback_data": f"sessreport_30_{server.id}"},
+        ],
+        [{"text": "◀️ Назад", "callback_data": f"sessions_{server.id}"}],
+    ]}
+    _send(chat_id, "📋 Звіт сесій за який період?", topic_id, kb, message_id)
+
+
+def _handle_sessions_report(chat_id, topic_id, message_id, server: Server, days: int):
+    """Render the paired user-session report (user · IP · connect→disconnect · duration).
+    Формує звіт сесій (юзер · IP · вхід→вихід · тривалість) за період."""
+    from models import RdpSession
+
+    db: Session = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        rows = (
+            db.query(RdpSession)
+            .filter(RdpSession.server_id == server.id,
+                    RdpSession.logon_time >= cutoff)
+            .order_by(RdpSession.logon_time.desc())
+            .limit(40)
+            .all()
+        )
+    finally:
+        db.close()
+
+    label = {1: "сьогодні", 7: "7 днів", 30: "30 днів"}.get(days, f"{days} дн")
+    back = {"inline_keyboard": [[{"text": "◀️ Назад", "callback_data": f"sessions_{server.id}"}]]}
+
+    if not rows:
+        _send(chat_id, f"📋 <b>Сесії — {server.name}</b> ({label})\n\nСесій за період немає",
+              topic_id, back, message_id)
+        return
+
+    off = settings.report_utc_offset
+    lines = [f"📋 <b>Сесії — {server.name}</b> ({label})", ""]
+    for r in rows[:30]:
+        lt = (r.logon_time + timedelta(hours=off)).strftime("%d.%m %H:%M")
+        if r.logoff_time is None:
+            span, dur = lt, "🟢 активна"
+        else:
+            end = (r.logoff_time + timedelta(hours=off)).strftime("%H:%M")
+            span, dur = f"{lt}→{end}", _fmt_session_dur(r.duration_sec)
+        lines.append(f"👤 <b>{r.username or '?'}</b> · {r.ip or '—'}\n   {span} · {dur}")
+
+    _send(chat_id, "\n".join(lines), topic_id, back, message_id)
 
 
 def _handle_disk(chat_id, topic_id, message_id, server: Server, metrics: dict):

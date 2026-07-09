@@ -57,7 +57,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent")
 
-AGENT_VERSION = "1.4.1"
+AGENT_VERSION = "1.5.0"
 
 try:
     import requests

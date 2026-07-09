@@ -83,6 +83,18 @@ export const ukStrings = {
   "rdp.colNewIp": "Новий IP",
   "rdp.newBadge": "новий",
 
+  // ── Сесії користувачів / User sessions ───────────────────────────────
+  "sessions.title": "Сесії користувачів",
+  "sessions.empty": "Сесій за обраний період немає",
+  "sessions.colUser": "Користувач",
+  "sessions.colConnect": "Підключення",
+  "sessions.colDisconnect": "Відключення",
+  "sessions.colDuration": "Тривалість",
+  "sessions.active": "активна",
+  "sessions.periodToday": "Сьогодні",
+  "sessions.period7d": "7 днів",
+  "sessions.period30d": "30 днів",
+
   // ── Alerts / Алерти ──────────────────────────────────────────────────
   "alerts.recentTitle": "Останні алерти",
   "alerts.none": "Алертів немає",

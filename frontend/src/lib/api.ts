@@ -103,6 +103,15 @@ export interface RdpLogEntry {
   event_time: string | null;
 }
 
+export interface RdpSessionEntry {
+  username: string;
+  ip: string | null;
+  logon_time: string | null;
+  logoff_time: string | null;
+  duration_sec: number | null;
+  active: boolean;
+}
+
 export interface LoginLogEntry {
   id: number;
   admin_id: number;
@@ -149,6 +158,8 @@ export const api = {
       `/api/dashboard/servers/${id}/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
     ),
   rdpLog: (id: string) => req<RdpLogEntry[]>(`/api/dashboard/servers/${id}/rdp-log`),
+  rdpSessions: (id: string, days: number) =>
+    req<RdpSessionEntry[]>(`/api/dashboard/servers/${id}/rdp-sessions?days=${days}`),
   authLogs: () => req<LoginLogEntry[]>("/api/dashboard/auth-logs"),
   diskForecast: (id: string) =>
     req<DiskForecast[]>(`/api/dashboard/servers/${id}/disk-forecast`),

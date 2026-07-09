@@ -56,6 +56,12 @@ def receive_metrics(
     # Зберігаємо нові RDP-входи (дублікати відфільтровуються UNIQUE constraint).
     _save_rdp_events(db, server.id, payload.get("recent_logins", []))
 
+    # Pair logon/logoff into user sessions with duration.
+    # Парування вхід/вихід у сесії користувачів з тривалістю.
+    _save_rdp_sessions(db, server.id,
+                       payload.get("recent_logins", []),
+                       payload.get("recent_logoffs", []))
+
     # Run alert analysis in the background so the agent is not blocked.
     # Аналіз і відправка алертів — у фоні щоб не блокувати агента.
     background.add_task(_analyze_and_alert, server.id, server.name, payload)
@@ -91,6 +97,83 @@ def _save_rdp_events(db: Session, server_id: str, logins: list):
             db.commit()
         except Exception:
             db.rollback()   # UNIQUE violation — duplicate event, skip / дублікат — пропускаємо
+
+
+def _to_utc(time_str: str):
+    """Parse an agent local-time string and normalise to naive UTC.
+    Парсить локальний час агента і нормалізує до naive UTC."""
+    try:
+        return (datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+                - timedelta(hours=settings.report_utc_offset))
+    except (ValueError, TypeError):
+        return None
+
+
+def _save_rdp_sessions(db: Session, server_id: str, logins: list, logoffs: list):
+    """Pair logon/logoff events by logon_id into RdpSession rows.
+    Парує події вхід/вихід за logon_id у рядки RdpSession.
+
+    Logon opens the session (idempotent by server_id+logon_id); logoff closes
+    the matching open session and computes duration. Both are safe to replay:
+    a repeated logon is ignored, a logoff for an already-closed or unknown
+    session is skipped.
+    Вхід відкриває сесію (ідемпотентно за server_id+logon_id); вихід закриває
+    відповідну відкриту сесію й рахує тривалість. Обидва безпечні до повторів:
+    повторний вхід ігнорується, вихід для вже закритої/невідомої сесії — пропуск.
+    """
+    from models import RdpSession
+
+    # 1) Open sessions from logon events / Відкриваємо сесії з подій входу
+    for entry in logins:
+        logon_id = (entry.get("logon_id") or "").strip()
+        logon_time = _to_utc(entry.get("time", ""))
+        if not logon_id or logon_time is None:
+            continue
+        exists = (
+            db.query(RdpSession)
+            .filter(RdpSession.server_id == server_id,
+                    RdpSession.logon_id == logon_id)
+            .first()
+        )
+        if exists:
+            continue
+        try:
+            db.add(RdpSession(
+                server_id=server_id,
+                logon_id=logon_id,
+                username=entry.get("username", ""),
+                ip=entry.get("ip", ""),
+                logon_time=logon_time,
+            ))
+            db.commit()
+        except Exception:
+            db.rollback()   # concurrent duplicate — skip / паралельний дубль — пропуск
+
+    # 2) Close sessions from logoff events / Закриваємо сесії з подій виходу
+    for entry in logoffs:
+        logon_id = (entry.get("logon_id") or "").strip()
+        logoff_time = _to_utc(entry.get("time", ""))
+        if not logon_id or logoff_time is None:
+            continue
+        row = (
+            db.query(RdpSession)
+            .filter(RdpSession.server_id == server_id,
+                    RdpSession.logon_id == logon_id,
+                    RdpSession.logoff_time.is_(None))
+            .first()
+        )
+        if not row:
+            continue  # no matching open RDP session — orphan logoff, skip
+                      # немає відкритої RDP-сесії — «сирітський» вихід, пропуск
+        # Guard against clock skew producing negative durations.
+        # Захист від від'ємної тривалості через розбіжність годинника.
+        dur = int((logoff_time - row.logon_time).total_seconds())
+        row.logoff_time = logoff_time
+        row.duration_sec = max(0, dur)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 def _save_numeric_metrics(db: Session, server_id: str, payload: dict, now: datetime):

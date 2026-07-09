@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from database import get_db
-from models import Server, MetricsSnapshot, Alert, Command, PendingAlert, Metric, LoginLog, RdpLog
+from models import (Server, MetricsSnapshot, Alert, Command, PendingAlert,
+                    Metric, LoginLog, RdpLog, RdpSession)
 import security
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
@@ -20,7 +21,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
 
 # Latest known agent version — used to flag outdated agents in the overview.
 # Остання відома версія агента — для позначення застарілих агентів в overview.
-LATEST_AGENT_VERSION = "1.4.1"
+LATEST_AGENT_VERSION = "1.5.0"
 
 # A server is considered online if its last_seen is within this window.
 # Сервер вважається онлайн якщо last_seen в межах цього вікна.
@@ -282,6 +283,38 @@ def rdp_log(server_id: str, limit: int = 200, db: Session = Depends(get_db)):
             "ip":         r.ip,
             "is_new_ip":  bool(r.is_new_ip),
             "event_time": r.event_time.isoformat() if r.event_time else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/servers/{server_id}/rdp-sessions")
+def rdp_sessions(server_id: str, days: int = 7, limit: int = 500,
+                 db: Session = Depends(get_db)):
+    """User RDP sessions with duration for the last N days (times stored as UTC).
+    RDP-сесії користувачів з тривалістю за останні N днів (час у UTC).
+
+    Active sessions (no logoff yet) are included with duration_sec = null.
+    Активні сесії (ще без виходу) включені з duration_sec = null.
+    """
+    days = max(1, min(days, 365))   # clamp / обмежуємо діапазон
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        db.query(RdpSession)
+        .filter(RdpSession.server_id == server_id,
+                RdpSession.logon_time >= cutoff)
+        .order_by(RdpSession.logon_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "username":     r.username,
+            "ip":           r.ip,
+            "logon_time":   r.logon_time.isoformat() if r.logon_time else None,
+            "logoff_time":  r.logoff_time.isoformat() if r.logoff_time else None,
+            "duration_sec": r.duration_sec,
+            "active":       r.logoff_time is None,
         }
         for r in rows
     ]

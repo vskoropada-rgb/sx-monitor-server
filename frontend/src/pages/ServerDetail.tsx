@@ -24,6 +24,7 @@ import {
   Download,
   History,
   TrendingUp,
+  Users,
 } from "lucide-react";
 import type { RdpLogEntry } from "@/lib/api";
 import {
@@ -216,6 +217,95 @@ function MetricsChart({ serverId }: { serverId: string }) {
               />
             </LineChart>
           </ResponsiveContainer>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ── user sessions section ───────────────────────────────────────────────────────
+
+function UserSessions({ serverId }: { serverId: string }) {
+  const { t, fmtDateTime, fmtDuration } = useI18n();
+  const [days, setDays] = useState<1 | 7 | 30>(7);
+
+  const { data = [], isLoading } = useQuery({
+    queryKey: ["rdpSessions", serverId, days],
+    queryFn: () => api.rdpSessions(serverId, days),
+    refetchInterval: 60000,
+  });
+
+  const periods: Array<{ d: 1 | 7 | 30; key: StringKey }> = [
+    { d: 1,  key: "sessions.periodToday" },
+    { d: 7,  key: "sessions.period7d" },
+    { d: 30, key: "sessions.period30d" },
+  ];
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-accent" />
+          <span className="font-semibold">{t("sessions.title")}</span>
+        </div>
+        <div className="flex gap-1">
+          {periods.map((p) => (
+            <button
+              key={p.d}
+              onClick={() => setDays(p.d)}
+              className={cn(
+                "px-2 py-0.5 text-xs rounded",
+                days === p.d
+                  ? "bg-accent text-bg font-semibold"
+                  : "text-muted hover:text-text"
+              )}
+            >
+              {t(p.key)}
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardBody className="p-0 max-h-96 overflow-y-auto overflow-x-auto">
+        {isLoading ? (
+          <p className="text-sm text-muted px-4 py-3">{t("common.loading")}</p>
+        ) : data.length === 0 ? (
+          <p className="text-sm text-muted px-4 py-3">{t("sessions.empty")}</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-panel">
+              <tr className="text-xs text-muted border-b border-border/60">
+                <th className="text-left px-4 py-2">{t("sessions.colUser")}</th>
+                <th className="text-left px-4 py-2">IP</th>
+                <th className="text-left px-4 py-2 w-36">{t("sessions.colConnect")}</th>
+                <th className="text-left px-4 py-2 w-36">{t("sessions.colDisconnect")}</th>
+                <th className="text-right px-4 py-2 w-24">{t("sessions.colDuration")}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/30">
+              {data.map((s, i) => (
+                <tr key={i} className={cn("hover:bg-panel2/40", s.active ? "bg-ok/5" : "")}>
+                  <td className="px-4 py-2 font-mono text-xs">{s.username || "—"}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{s.ip ?? "—"}</td>
+                  <td className="px-4 py-2 text-xs text-muted whitespace-nowrap">
+                    {fmtDateTime(s.logon_time)}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted whitespace-nowrap">
+                    {s.active ? (
+                      <Badge tone="ok">
+                        <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />
+                        {t("sessions.active")}
+                      </Badge>
+                    ) : (
+                      fmtDateTime(s.logoff_time)
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right text-xs font-medium whitespace-nowrap">
+                    {s.active ? "—" : fmtDuration(s.duration_sec)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </CardBody>
     </Card>
@@ -1315,6 +1405,9 @@ export function ServerDetail() {
             )}
           </CardBody>
         </Card>
+
+        {/* ── Section 7c: User sessions / Сесії користувачів ───────────────── */}
+        <UserSessions serverId={data.id} />
 
         {/* ── Section 8: Recent alerts / Останні алерти ────────────────────── */}
         <Card>

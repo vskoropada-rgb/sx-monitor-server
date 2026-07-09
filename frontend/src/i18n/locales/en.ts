@@ -83,6 +83,18 @@ export const enStrings: Record<keyof typeof ukStrings, string> = {
   "rdp.colNewIp": "New IP",
   "rdp.newBadge": "new",
 
+  // ── User sessions ────────────────────────────────────────────────────
+  "sessions.title": "User sessions",
+  "sessions.empty": "No sessions in the selected period",
+  "sessions.colUser": "User",
+  "sessions.colConnect": "Connected",
+  "sessions.colDisconnect": "Disconnected",
+  "sessions.colDuration": "Duration",
+  "sessions.active": "active",
+  "sessions.periodToday": "Today",
+  "sessions.period7d": "7 days",
+  "sessions.period30d": "30 days",
+
   // ── Alerts ───────────────────────────────────────────────────────────
   "alerts.recentTitle": "Recent alerts",
   "alerts.none": "No alerts",

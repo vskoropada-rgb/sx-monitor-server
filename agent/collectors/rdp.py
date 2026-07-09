@@ -103,14 +103,20 @@ def get_recent_rdp_logins(minutes: int = 60) -> List[dict]:
 
                     username = (strings[5] or "").strip() if len(strings) > 5 else ""
                     ip = (strings[18] or "").strip() if len(strings) > 18 else "unknown"
+                    # TargetLogonId (index 7) uniquely ties this logon to its
+                    # matching logoff (4634/4647) so the server can pair sessions.
+                    # TargetLogonId (індекс 7) унікально зв'язує цей вхід із
+                    # відповідним виходом (4634/4647) — сервер парує сесії.
+                    logon_id = (strings[7] or "").strip() if len(strings) > 7 else ""
 
                     if not username or not ip:
                         continue
 
                     logins.append({
-                        "username": username,
-                        "ip":       ip,
-                        "time":     event_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "username":  username,
+                        "ip":        ip,
+                        "logon_id":  logon_id,
+                        "time":      event_time.strftime("%Y-%m-%d %H:%M:%S"),
                         "is_new_ip": not is_known_ip(ip),
                     })
                     if ip not in ("", "-", "unknown"):
@@ -126,15 +132,85 @@ def get_recent_rdp_logins(minutes: int = 60) -> List[dict]:
     return logins
 
 
+def get_recent_rdp_logoffs(minutes: int = 60) -> List[dict]:
+    """Read Event ID 4634/4647 (logoff) for the last N minutes.
+    Читає Event ID 4634/4647 (вихід) за останні N хвилин.
+
+    Each logoff carries a TargetLogonId that matches the logon's; the server
+    pairs them to compute session duration. LogonType is not always present on
+    4634, so we do not filter by it here — the server keeps only logoffs whose
+    logon_id matches a tracked RDP logon.
+    Кожен вихід містить TargetLogonId, що збігається з входом; сервер парує їх
+    для обчислення тривалості. LogonType на 4634 присутній не завжди, тож тут не
+    фільтруємо — сервер лишає лише виходи, чий logon_id збігається з RDP-входом.
+
+    Note: TimeGenerated returns local Windows time, not UTC.
+    Примітка: TimeGenerated повертає локальний час Windows, не UTC.
+    """
+    try:
+        import win32evtlog
+    except ImportError:
+        return []
+
+    logoffs: List[dict] = []
+    try:
+        hand = win32evtlog.OpenEventLog(None, "Security")
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        cutoff = datetime.now() - timedelta(minutes=minutes)
+    except Exception as e:
+        logger.error("OpenEventLog (logoff) failed: %s", e)
+        return logoffs
+
+    try:
+        while True:
+            records = win32evtlog.ReadEventLog(hand, flags, 0)
+            if not records:
+                break
+            for rec in records:
+                try:
+                    event_time = datetime(*rec.TimeGenerated.timetuple()[:6])
+                    if event_time < cutoff:
+                        return logoffs  # reading backwards — older records follow
+                                        # читаємо з кінця — далі тільки старіші
+                    if (rec.EventID & 0xFFFF) not in (4634, 4647):
+                        continue
+
+                    strings = rec.StringInserts or []
+                    # 4634/4647 layout: [1]=TargetUserName, [3]=TargetLogonId.
+                    # Layout 4634/4647: [1]=TargetUserName, [3]=TargetLogonId.
+                    if len(strings) <= 3:
+                        continue
+                    username = (strings[1] or "").strip()
+                    logon_id = (strings[3] or "").strip()
+                    if not logon_id:
+                        continue
+
+                    logoffs.append({
+                        "username": username,
+                        "logon_id": logon_id,
+                        "time":     event_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+                except Exception as e:
+                    logger.debug("Skip logoff event: %s", e)
+    finally:
+        try:
+            win32evtlog.CloseEventLog(hand)
+        except Exception:
+            pass
+
+    return logoffs
+
+
 def collect(config: dict) -> dict:
-    """Collect all RDP metrics: active sessions, recent logins, new-IP alerts.
-    Збирає всі RDP-метрики: активні сесії, нещодавні входи, алерти нових IP."""
+    """Collect all RDP metrics: active sessions, recent logins/logoffs, new-IP alerts.
+    Збирає всі RDP-метрики: активні сесії, нещодавні входи/виходи, алерти нових IP."""
     active = get_active_sessions()
     ips = get_session_ips()
     # Extend the lookback window slightly beyond the poll interval to avoid gaps.
     # Розширюємо вікно перегляду трохи більше за інтервал опитування щоб не пропустити події.
     minutes = max(2, int(config.get("CHECK_INTERVAL_SEC", 60)) // 60 + 2)
     recent = get_recent_rdp_logins(minutes=minutes)
+    logoffs = get_recent_rdp_logoffs(minutes=minutes)
 
     new_ip_alerts = [
         l for l in recent
@@ -145,6 +221,7 @@ def collect(config: dict) -> dict:
         "active_sessions": active,
         "active_ips":      list(ips.keys()),
         "recent_logins":   recent,
+        "recent_logoffs":  logoffs,
         "new_ip_alerts":   new_ip_alerts,
         "session_count":   len(active),
     }

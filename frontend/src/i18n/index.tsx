@@ -90,6 +90,7 @@ interface I18nValue {
   fmtTime: (iso: string | null) => string; // HH:mm:ss
   fmtHm: (iso: string | null) => string; // HH:mm
   fmtDowntime: (min: number) => string;
+  fmtDuration: (sec: number | null) => string; // session length, seconds → "2г 15хв"
   timeAgo: (iso: string | null) => string;
 }
 
@@ -156,6 +157,17 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       return m > 0 ? `${h}h ${m}m` : `${h} h`;
     };
 
+    const fmtDuration = (sec: number | null) => {
+      if (sec == null) return "—";
+      if (sec < 60) return lang === "uk" ? `${sec} с` : `${sec} s`;
+      const totalMin = Math.floor(sec / 60);
+      const h = Math.floor(totalMin / 60);
+      const m = totalMin % 60;
+      if (h === 0) return lang === "uk" ? `${m} хв` : `${m} min`;
+      if (lang === "uk") return m > 0 ? `${h}г ${m}хв` : `${h} год`;
+      return m > 0 ? `${h}h ${m}m` : `${h} h`;
+    };
+
     const timeAgo = (iso: string | null) => {
       if (!iso) return "—";
       const sec = Math.floor((Date.now() - parseIso(iso).getTime()) / 1000);
@@ -181,6 +193,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       fmtTime,
       fmtHm,
       fmtDowntime,
+      fmtDuration,
       timeAgo,
     };
   }, [lang, setLang]);
