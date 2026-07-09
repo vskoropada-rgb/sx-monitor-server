@@ -340,6 +340,13 @@ def handle_callback(update: dict):
         finally:
             db.close()
         _send(chat_id, f"✅ Режим обслуговування знято для {server.name}", topic_id, message_id=message_id)
+    elif action.startswith("unblock_confirm_"):
+        # Must precede the "unblock_" branch — otherwise startswith("unblock_")
+        # would swallow the confirm callback and the queue step is unreachable.
+        # Має бути ПЕРЕД гілкою "unblock_" — інакше startswith("unblock_")
+        # перехопить callback підтвердження і крок постановки в чергу недосяжний.
+        ip = data[len("unblock_confirm_"):-(len(server.id) + 1)]
+        _queue_command(chat_id, topic_id, message_id, server, "unblock_ip", {"ip": ip})
     elif action.startswith("unblock_"):
         ip = data[len("unblock_"):-(len(server.id) + 1)]
         keyboard = {"inline_keyboard": [[
@@ -347,9 +354,6 @@ def handle_callback(update: dict):
             {"text": "❌ Скасувати",          "callback_data": f"status_{server.id}"},
         ]]}
         _send(chat_id, f"🔓 Розблокувати IP <b>{ip}</b>?", topic_id, keyboard, message_id)
-    elif action.startswith("unblock_confirm_"):
-        ip = data[len("unblock_confirm_"):-(len(server.id) + 1)]
-        _queue_command(chat_id, topic_id, message_id, server, "unblock_ip", {"ip": ip})
     elif action == "reboot":
         sessions = metrics.get("active_sessions", [])
         warn = f"\n⚠️ Активних сесій: {len(sessions)}" if sessions else ""

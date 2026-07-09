@@ -59,6 +59,9 @@ def receive_metrics(
     # Run alert analysis in the background so the agent is not blocked.
     # Аналіз і відправка алертів — у фоні щоб не блокувати агента.
     background.add_task(_analyze_and_alert, server.id, server.name, payload)
+    # Auto-block brute-force IPs in the background as well.
+    # Автоблок IP-перебірників — теж у фоні.
+    background.add_task(_auto_block_suspicious, server.id, server.name, payload)
 
     return {"ok": True}
 
@@ -220,3 +223,140 @@ def _analyze_and_alert(server_id: str, server_name: str, payload: dict):
                 db.close()
             except Exception:
                 pass
+
+
+def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
+    """EN: Automatically block external IPs that exceed the brute-force threshold.
+    UK: Автоматично блокуємо зовнішні IP, що перевищили поріг перебору паролів.
+
+    Safeguards / Запобіжники:
+      - Private RFC1918 IPs are never blocked — only alerted (via analyzer).
+        Приватні RFC1918 IP ніколи не блокуються — лише сповіщення (через analyzer).
+      - Allowlisted IPs/CIDRs (office, VPN) are skipped.
+        IP/CIDR з allowlist (офіс, VPN) пропускаються.
+      - Already-blocked and in-flight IPs are deduplicated.
+        Уже заблоковані та ті, що в черзі, дедуплікуються.
+      - Blocks are permanent (no TTL) — admin can undo via the Telegram button.
+        Блокування безстрокове — адмін може скасувати кнопкою в Telegram.
+    """
+    import ipaddress
+    from config import settings
+
+    if not settings.auto_block_enabled:
+        return
+
+    suspicious = payload.get("suspicious_ips") or []
+    if not suspicious:
+        return
+
+    db = None
+    try:
+        from routers.commands import create_command
+        from models import Command
+
+        db = next(get_db())
+        server = db.query(Server).filter(Server.id == server_id).first()
+        if not server:
+            return
+
+        # Skip auto-actions while the server is in maintenance mode.
+        # Не діємо, поки сервер у режимі обслуговування.
+        if server.maintenance_until and server.maintenance_until > datetime.utcnow():
+            return
+
+        threshold       = settings.auto_block_threshold
+        allow_nets      = settings.auto_block_networks
+        already_blocked = set(payload.get("blocked_ips") or [])
+
+        for entry in suspicious:
+            ip    = (entry.get("ip") or "").strip()
+            count = entry.get("count", 0)
+
+            # Threshold is "more than N" — trigger strictly above it.
+            # Поріг — «більше за N» — спрацьовуємо строго вище.
+            if not ip or count <= threshold:
+                continue
+
+            try:
+                ip_obj = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+
+            # Never block private (RFC1918) or allowlisted addresses.
+            # Ніколи не блокуємо приватні (RFC1918) чи allowlist-адреси.
+            if ip_obj.is_private:
+                continue
+            if any(ip_obj in net for net in allow_nets):
+                continue
+
+            # Already blocked in the agent's firewall — nothing to do.
+            # Уже заблоковано у firewall агента — нічого не робимо.
+            if ip in already_blocked:
+                continue
+
+            # A block command is already queued/executing for this IP — dedup.
+            # Команда блокування для цього IP вже в черзі/виконується — дедуп.
+            inflight = (
+                db.query(Command)
+                .filter(
+                    Command.server_id == server_id,
+                    Command.action == "block_ip",
+                    Command.status.in_(["pending", "executing"]),
+                    Command.params["ip"].astext == ip,
+                )
+                .first()
+            )
+            if inflight:
+                continue
+
+            create_command(db, server_id, "block_ip", {"ip": ip})
+            _notify_auto_block(server, ip, count, entry.get("usernames") or [])
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("auto_block error: %s", e)
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def _notify_auto_block(server, ip: str, count: int, usernames: list):
+    """EN: Send a Telegram notice about an automatic block, with an unblock button.
+    UK: Сповіщення в Telegram про автоблокування, з кнопкою розблокування."""
+    import json
+    import logging
+    import requests
+    from config import settings
+
+    token = settings.tg_bot_token
+    group = settings.tg_group_id
+    if not token or not group:
+        return
+
+    users = ", ".join(usernames[:5]) if usernames else "—"
+    text = (
+        f"🚫 <b>Автоблокування — {server.name}</b>\n"
+        f"IP <code>{ip}</code> заблоковано назавжди після {count} невдалих спроб входу.\n"
+        f"Логіни: {users}"
+    )
+    keyboard = {"inline_keyboard": [[
+        {"text": "🔓 Розблокувати", "callback_data": f"unblock_{ip}_{server.id}"}
+    ]]}
+    payload = {
+        "chat_id":                  group,
+        "text":                     text,
+        "parse_mode":               "HTML",
+        "disable_web_page_preview": True,
+        "reply_markup":             json.dumps(keyboard),
+    }
+    if server.tg_topic_id:
+        payload["message_thread_id"] = int(server.tg_topic_id)
+
+    try:
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                      json=payload, timeout=10)
+    except Exception as e:
+        logging.getLogger(__name__).error("notify_auto_block error: %s", e)

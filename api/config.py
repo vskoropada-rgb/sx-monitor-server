@@ -24,6 +24,23 @@ class Settings(BaseSettings):
     # Зсув UTC для щоденного звіту. Україна: влітку +3, взимку +2.
     report_utc_offset: int = 3
 
+    # ─── Auto-block on password brute-force ──────────────────────
+    # Master switch. If False — only a Telegram alert with a manual "block"
+    # button is sent, no firewall rule is created automatically.
+    # Головний вимикач. Якщо False — лише сповіщення в Telegram з кнопкою
+    # ручного блокування, автоматичне правило firewall не створюється.
+    auto_block_enabled: bool = True
+    # Auto-block triggers when failed logins from one external IP exceed this
+    # number within the brute-force window (default 10 min). "More than N".
+    # Автоблок спрацьовує, коли невдалих спроб з одного зовнішнього IP БІЛЬШЕ
+    # за це число за вікно перебору (типово 10 хв). «Більше за N».
+    auto_block_threshold: int = 10
+    # Never-block IPs/CIDRs (office, VPN), comma-separated. Private RFC1918
+    # ranges are never blocked regardless of this list.
+    # IP/CIDR, які ніколи не блокуємо (офіс, VPN), через кому. Приватні мережі
+    # RFC1918 не блокуються в будь-якому разі.
+    auto_block_allowlist: str = ""
+
     # Shared secret for new agent registration (POST /api/servers/register).
     # Separate from secret_key so agents never see the master JWT key.
     # Секрет для реєстрації нових агентів (POST /api/servers/register).
@@ -71,6 +88,22 @@ class Settings(BaseSettings):
         """Parsed set of allowed admin Telegram IDs.
         Розбитий набір дозволених Telegram ID адміністраторів."""
         return {int(x) for x in self.dashboard_admins.split(",") if x.strip()}
+
+    @property
+    def auto_block_networks(self):
+        """Parsed allowlist as ip_network objects (invalid entries skipped).
+        Розпарсений allowlist як об'єкти ip_network (невалідні — пропускаються)."""
+        import ipaddress
+        nets = []
+        for item in self.auto_block_allowlist.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                nets.append(ipaddress.ip_network(item, strict=False))
+            except ValueError:
+                pass
+        return nets
 
     class Config:
         env_file = ".env"
