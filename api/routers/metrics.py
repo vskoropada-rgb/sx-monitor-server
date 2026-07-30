@@ -12,10 +12,14 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
+import logging
+
 from database import get_db
 from models import Server, Metric, MetricsSnapshot, RdpLog
 from auth import get_server
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["metrics"])
 
@@ -328,9 +332,28 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
     if not settings.auto_block_enabled:
         return
 
-    suspicious = payload.get("suspicious_ips") or []
-    if not suspicious:
+    # Merge candidate IPs from both fields the agent may populate:
+    # suspicious_ips (external-only list) and brute_force_alerts (the list that
+    # drives the visible alert + manual block button). Keep the highest count.
+    # Об'єднуємо кандидатів з обох полів агента: suspicious_ips і
+    # brute_force_alerts (те, що показує алерт і кнопку). Беремо максимальний count.
+    candidates: dict = {}
+    for entry in (payload.get("suspicious_ips") or []) + (payload.get("brute_force_alerts") or []):
+        ip = (entry.get("ip") or "").strip()
+        if not ip:
+            continue                       # local logins have no IP / локальні — без IP
+        if entry.get("is_known_network"):
+            continue                       # internal network — alert only / внутрішня — лише алерт
+        cnt = entry.get("count", 0)
+        prev = candidates.get(ip)
+        if prev is None or cnt > prev["count"]:
+            candidates[ip] = {"count": cnt, "usernames": entry.get("usernames") or []}
+
+    threshold = settings.auto_block_threshold
+    if not candidates:
         return
+    logger.info("auto_block[%s]: candidates=%s threshold=%d",
+                server_name, {ip: c["count"] for ip, c in candidates.items()}, threshold)
 
     db = None
     try:
@@ -345,19 +368,20 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
         # Skip auto-actions while the server is in maintenance mode.
         # Не діємо, поки сервер у режимі обслуговування.
         if server.maintenance_until and server.maintenance_until > datetime.utcnow():
+            logger.info("auto_block[%s]: skipped — maintenance mode", server_name)
             return
 
-        threshold       = settings.auto_block_threshold
         allow_nets      = settings.auto_block_networks
         already_blocked = set(payload.get("blocked_ips") or [])
 
-        for entry in suspicious:
-            ip    = (entry.get("ip") or "").strip()
-            count = entry.get("count", 0)
+        for ip, info in candidates.items():
+            count = info["count"]
 
             # Threshold is "more than N" — trigger strictly above it.
             # Поріг — «більше за N» — спрацьовуємо строго вище.
-            if not ip or count <= threshold:
+            if count <= threshold:
+                logger.info("auto_block[%s]: %s below threshold (%d<=%d)",
+                            server_name, ip, count, threshold)
                 continue
 
             try:
@@ -368,8 +392,10 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
             # Never block private (RFC1918) or allowlisted addresses.
             # Ніколи не блокуємо приватні (RFC1918) чи allowlist-адреси.
             if ip_obj.is_private:
+                logger.info("auto_block[%s]: %s is private — alert only", server_name, ip)
                 continue
             if any(ip_obj in net for net in allow_nets):
+                logger.info("auto_block[%s]: %s in allowlist — skip", server_name, ip)
                 continue
 
             # Already blocked in the agent's firewall — nothing to do.
@@ -393,11 +419,11 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
                 continue
 
             create_command(db, server_id, "block_ip", {"ip": ip})
-            _notify_auto_block(server, ip, count, entry.get("usernames") or [])
+            _notify_auto_block(server, ip, count, info["usernames"])
+            logger.info("auto_block[%s]: BLOCKED %s (%d attempts)", server_name, ip, count)
 
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("auto_block error: %s", e)
+        logger.error("auto_block error: %s", e)
     finally:
         if db is not None:
             try:
