@@ -25,6 +25,8 @@ import {
   History,
   TrendingUp,
   Users,
+  Ban,
+  ShieldCheck,
 } from "lucide-react";
 import type { RdpLogEntry } from "@/lib/api";
 import {
@@ -301,6 +303,103 @@ function UserSessions({ serverId }: { serverId: string }) {
                   </td>
                   <td className="px-4 py-2 text-right text-xs font-medium whitespace-nowrap">
                     {s.active ? "—" : fmtDuration(s.duration_sec)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+// ── brute-force audit section ───────────────────────────────────────────────────
+
+function BruteForceAudit({ serverId }: { serverId: string }) {
+  const { t, fmtDateTime } = useI18n();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const { data = [], isLoading, refetch } = useQuery({
+    queryKey: ["bruteForce", serverId],
+    queryFn: () => api.bruteForce(serverId, 30),
+    refetchInterval: 60000,
+  });
+
+  async function toggle(ip: string, blocked: boolean) {
+    setBusy(ip);
+    try {
+      if (blocked) await api.unblockIp(serverId, ip);
+      else await api.blockIp(serverId, ip);
+    } finally {
+      // Firewall change is applied by the agent on its next poll (up to ~1 min);
+      // refetch shortly after and let the interval confirm the final state.
+      setTimeout(() => { refetch(); setBusy(null); }, 2000);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center gap-2">
+        <ShieldAlert className="w-4 h-4 text-crit" />
+        <span className="font-semibold">{t("brute.title")}</span>
+        {data.length > 0 && (
+          <span className="text-xs text-muted">{data.length}</span>
+        )}
+      </CardHeader>
+      <CardBody className="p-0 max-h-96 overflow-y-auto overflow-x-auto">
+        {isLoading ? (
+          <p className="text-sm text-muted px-4 py-3">{t("common.loading")}</p>
+        ) : data.length === 0 ? (
+          <p className="text-sm text-muted px-4 py-3">{t("brute.empty")}</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-panel">
+              <tr className="text-xs text-muted border-b border-border/60">
+                <th className="text-left px-4 py-2">{t("brute.colIp")}</th>
+                <th className="text-right px-4 py-2 w-16">{t("brute.colAttempts")}</th>
+                <th className="text-left px-4 py-2">{t("brute.colUsers")}</th>
+                <th className="text-left px-4 py-2 w-32">{t("brute.colLastSeen")}</th>
+                <th className="text-right px-4 py-2 w-40">{t("brute.colStatus")}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/30">
+              {data.map((b) => (
+                <tr key={b.ip} className={cn("hover:bg-panel2/40", !b.blocked ? "bg-warn/5" : "")}>
+                  <td className="px-4 py-2 font-mono text-xs">{b.ip}</td>
+                  <td className="px-4 py-2 text-right font-mono text-xs">{b.attempts}</td>
+                  <td className="px-4 py-2 text-xs text-muted truncate max-w-[180px]">
+                    {b.usernames.length ? b.usernames.join(", ") : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted whitespace-nowrap">
+                    {fmtDateTime(b.last_seen)}
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center justify-end gap-2">
+                      {b.blocked ? (
+                        <Badge tone="crit">🔒 {t("brute.blocked")}</Badge>
+                      ) : (
+                        <Badge tone="warn">{t("brute.notBlocked")}</Badge>
+                      )}
+                      <button
+                        onClick={() => toggle(b.ip, b.blocked)}
+                        disabled={busy === b.ip}
+                        className={cn(
+                          "inline-flex items-center gap-1 px-2 py-1 text-xs rounded font-medium transition-colors disabled:opacity-50",
+                          b.blocked
+                            ? "text-ok border border-ok/30 hover:bg-ok/10"
+                            : "text-crit border border-crit/30 hover:bg-crit/10"
+                        )}
+                      >
+                        {busy === b.ip ? (
+                          t("brute.blocking")
+                        ) : b.blocked ? (
+                          <><ShieldCheck className="w-3 h-3" /> {t("brute.unblock")}</>
+                        ) : (
+                          <><Ban className="w-3 h-3" /> {t("brute.block")}</>
+                        )}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1324,6 +1423,9 @@ export function ServerDetail() {
             </CardBody>
           </Card>
         )}
+
+        {/* ── Section 6b: Brute-force audit / Аудит перебору ───────────────── */}
+        <BruteForceAudit serverId={data.id} />
 
         {/* ── Section 7: Active RDP sessions / Активні RDP сесії ───────────── */}
         <Card>

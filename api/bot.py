@@ -320,6 +320,8 @@ def handle_callback(update: dict):
             _send_photo(chat_id, topic_id, chart, f"💾 Графік 24г — {server.name}")
         else:
             _send(chat_id, "📊 Даних ще немає", topic_id, message_id=message_id)
+    elif action == "bfaudit":
+        _handle_bruteforce_audit(chat_id, topic_id, message_id, server)
     elif action == "blocked_ips":
         _handle_blocked_ips(chat_id, topic_id, message_id, server, metrics)
     elif action == "maintenance":
@@ -425,6 +427,9 @@ def _handle_status(chat_id, topic_id, message_id, server: Server, metrics: dict)
         [
             {"text": "🔁 Сервіси",       "callback_data": f"restart_service_{server.id}"},
             {"text": "🔒 Заблоковані IP","callback_data": f"blocked_ips_{server.id}"},
+        ],
+        [
+            {"text": "🛡 Аудит перебору", "callback_data": f"bfaudit_{server.id}"},
         ],
         [
             {"text": "🔧 Обслуговування","callback_data": f"maintenance_{server.id}"},
@@ -569,6 +574,50 @@ def _handle_blocked_ips(chat_id, topic_id, message_id, server: Server, metrics: 
         lines.append(f"• {ip}")
     btns = [[{"text": f"🔓 {ip}", "callback_data": f"unblock_{ip}_{server.id}"}]
             for ip in blocked[:8]]
+    _send(chat_id, "\n".join(lines), topic_id, {"inline_keyboard": btns}, message_id)
+
+
+def _handle_bruteforce_audit(chat_id, topic_id, message_id, server: Server):
+    """Audit of brute-force source IPs with block status + block buttons.
+    Аудит IP-джерел перебору зі статусом блокування та кнопками блокування."""
+    from models import BruteForceIp, MetricsSnapshot
+
+    db: Session = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=30)
+        rows = (
+            db.query(BruteForceIp)
+            .filter(BruteForceIp.server_id == server.id,
+                    BruteForceIp.last_seen >= cutoff)
+            .order_by(BruteForceIp.attempts.desc())
+            .limit(20)
+            .all()
+        )
+        snap = (db.query(MetricsSnapshot)
+                .filter(MetricsSnapshot.server_id == server.id).first())
+        blocked = set((snap.data or {}).get("blocked_ips", [])) if snap else set()
+        items = [(r.ip, r.attempts, r.ip in blocked) for r in rows]
+    finally:
+        db.close()
+
+    back = {"inline_keyboard": [[{"text": "◀️ Назад", "callback_data": f"status_{server.id}"}]]}
+    if not items:
+        _send(chat_id, f"🛡 <b>Аудит перебору — {server.name}</b>\n\nСпроб не зафіксовано",
+              topic_id, back, message_id)
+        return
+
+    lines = [f"🛡 <b>Аудит перебору — {server.name}</b>", ""]
+    btns = []
+    for ip, attempts, is_blocked in items:
+        mark = "🔒" if is_blocked else "⚠️"
+        suffix = " — заблоковано" if is_blocked else ""
+        lines.append(f"{mark} <code>{ip}</code> · {attempts} спроб{suffix}")
+        # Block button only for not-yet-blocked IPs (cap to keep keyboard small).
+        # Кнопка блокування лише для незаблокованих (обмежуємо розмір клавіатури).
+        if not is_blocked and len(btns) < 8:
+            btns.append([{"text": f"🚫 Заблокувати {ip}",
+                          "callback_data": f"block_confirm_{ip}_{server.id}"}])
+    btns.append([{"text": "◀️ Назад", "callback_data": f"status_{server.id}"}])
     _send(chat_id, "\n".join(lines), topic_id, {"inline_keyboard": btns}, message_id)
 
 

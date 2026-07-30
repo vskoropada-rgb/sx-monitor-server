@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from database import get_db
 from models import (Server, MetricsSnapshot, Alert, Command, PendingAlert,
-                    Metric, LoginLog, RdpLog, RdpSession)
+                    Metric, LoginLog, RdpLog, RdpSession, BruteForceIp)
+from routers.commands import create_command
 import security
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
@@ -318,6 +319,70 @@ def rdp_sessions(server_id: str, days: int = 7, limit: int = 500,
         }
         for r in rows
     ]
+
+
+@router.get("/servers/{server_id}/brute-force")
+def brute_force_audit(server_id: str, days: int = 30,
+                      db: Session = Depends(get_db)):
+    """Audit of brute-force source IPs with current blocked/not-blocked status.
+    Аудит IP-джерел перебору з поточним статусом заблоковано/ні.
+
+    Blocked status comes from the agent's latest reported blocked_ips.
+    Статус блокування — з останнього blocked_ips, що надіслав агент.
+    """
+    days = max(1, min(days, 365))
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        db.query(BruteForceIp)
+        .filter(BruteForceIp.server_id == server_id,
+                BruteForceIp.last_seen >= cutoff)
+        .order_by(BruteForceIp.attempts.desc(), BruteForceIp.last_seen.desc())
+        .all()
+    )
+
+    snap = (db.query(MetricsSnapshot)
+            .filter(MetricsSnapshot.server_id == server_id).first())
+    blocked = set((snap.data or {}).get("blocked_ips", [])) if snap else set()
+
+    return [
+        {
+            "ip":         r.ip,
+            "attempts":   r.attempts,
+            "usernames":  r.usernames or [],
+            "first_seen": r.first_seen.isoformat() if r.first_seen else None,
+            "last_seen":  r.last_seen.isoformat() if r.last_seen else None,
+            "blocked":    r.ip in blocked,
+        }
+        for r in rows
+    ]
+
+
+class IpAction(BaseModel):
+    ip: str
+
+
+@router.post("/servers/{server_id}/block-ip")
+def block_ip_action(server_id: str, body: IpAction,
+                    db: Session = Depends(get_db)):
+    """Queue a firewall block for an IP from the dashboard.
+    Ставить у чергу блокування IP через firewall з дашборду."""
+    ip = (body.ip or "").strip()
+    if not ip:
+        return {"ok": False, "error": "empty ip"}
+    create_command(db, server_id, "block_ip", {"ip": ip})
+    return {"ok": True}
+
+
+@router.post("/servers/{server_id}/unblock-ip")
+def unblock_ip_action(server_id: str, body: IpAction,
+                      db: Session = Depends(get_db)):
+    """Queue a firewall unblock for an IP from the dashboard.
+    Ставить у чергу розблокування IP через firewall з дашборду."""
+    ip = (body.ip or "").strip()
+    if not ip:
+        return {"ok": False, "error": "empty ip"}
+    create_command(db, server_id, "unblock_ip", {"ip": ip})
+    return {"ok": True}
 
 
 @router.get("/auth-logs")

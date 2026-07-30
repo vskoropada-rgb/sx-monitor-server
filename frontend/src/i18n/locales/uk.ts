@@ -95,6 +95,20 @@ export const ukStrings = {
   "sessions.period7d": "7 днів",
   "sessions.period30d": "30 днів",
 
+  // ── Аудит перебору / Brute-force audit ───────────────────────────────
+  "brute.title": "Спроби перебору паролів",
+  "brute.empty": "Спроб перебору не зафіксовано",
+  "brute.colIp": "IP",
+  "brute.colAttempts": "Спроби",
+  "brute.colUsers": "Логіни",
+  "brute.colLastSeen": "Останній раз",
+  "brute.colStatus": "Статус",
+  "brute.blocked": "заблоковано",
+  "brute.notBlocked": "не заблоковано",
+  "brute.block": "Заблокувати",
+  "brute.unblock": "Розблокувати",
+  "brute.blocking": "…",
+
   // ── Alerts / Алерти ──────────────────────────────────────────────────
   "alerts.recentTitle": "Останні алерти",
   "alerts.none": "Алертів немає",

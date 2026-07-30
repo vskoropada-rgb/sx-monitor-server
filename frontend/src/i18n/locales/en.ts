@@ -95,6 +95,20 @@ export const enStrings: Record<keyof typeof ukStrings, string> = {
   "sessions.period7d": "7 days",
   "sessions.period30d": "30 days",
 
+  // ── Brute-force audit ────────────────────────────────────────────────
+  "brute.title": "Password brute-force attempts",
+  "brute.empty": "No brute-force attempts recorded",
+  "brute.colIp": "IP",
+  "brute.colAttempts": "Attempts",
+  "brute.colUsers": "Logins",
+  "brute.colLastSeen": "Last seen",
+  "brute.colStatus": "Status",
+  "brute.blocked": "blocked",
+  "brute.notBlocked": "not blocked",
+  "brute.block": "Block",
+  "brute.unblock": "Unblock",
+  "brute.blocking": "…",
+
   // ── Alerts ───────────────────────────────────────────────────────────
   "alerts.recentTitle": "Recent alerts",
   "alerts.none": "No alerts",

@@ -112,6 +112,15 @@ export interface RdpSessionEntry {
   active: boolean;
 }
 
+export interface BruteForceEntry {
+  ip: string;
+  attempts: number;
+  usernames: string[];
+  first_seen: string | null;
+  last_seen: string | null;
+  blocked: boolean;
+}
+
 export interface LoginLogEntry {
   id: number;
   admin_id: number;
@@ -179,4 +188,20 @@ export const api = {
   },
   logout: () =>
     fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }),
+  bruteForce: (id: string, days: number) =>
+    req<BruteForceEntry[]>(`/api/dashboard/servers/${id}/brute-force?days=${days}`),
+  blockIp: (id: string, ip: string) =>
+    fetch(`/api/dashboard/servers/${id}/block-ip`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip }),
+    }),
+  unblockIp: (id: string, ip: string) =>
+    fetch(`/api/dashboard/servers/${id}/unblock-ip`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip }),
+    }),
 };

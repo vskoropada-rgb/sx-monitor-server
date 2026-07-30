@@ -170,6 +170,34 @@ class RdpSession(Base):
     logged_at    = Column(DateTime, default=datetime.utcnow)
 
 
+class BruteForceIp(Base):
+    """Persisted brute-force source IPs per server, for the block-status audit.
+    Збережені IP-джерела перебору по серверах — для аудиту статусу блокування.
+
+    Populated from each metrics payload (suspicious_ips + brute_force_alerts).
+    `attempts` keeps the peak count seen in a single detection window (the count
+    is a rolling 10-min value, so max — not sum — avoids overcounting on replay).
+    Blocked/not-blocked status is derived at read time from the agent's current
+    blocked_ips, not stored here.
+    Заповнюється з кожної порції метрик. `attempts` — пік за одне вікно (count
+    ковзний за 10 хв, тому max, не сума). Статус блокування визначається при
+    читанні з поточного blocked_ips агента.
+    """
+    __tablename__ = "brute_force_ips"
+    __table_args__ = (
+        UniqueConstraint("server_id", "ip", name="uq_bruteforce_ip"),
+        Index("idx_bruteforce_server_seen", "server_id", "last_seen"),
+    )
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    server_id  = Column(String, ForeignKey("servers.id"), nullable=False)
+    ip         = Column(String, nullable=False)
+    attempts   = Column(Integer, default=0)   # peak count in a window / пік за вікно
+    usernames  = Column(JSONB)                # observed target usernames / цільові юзери
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen  = Column(DateTime, default=datetime.utcnow)
+
+
 class LoginLog(Base):
     """Dashboard administrator login/logout audit log.
     Журнал входів і виходів адміністраторів дашборду."""

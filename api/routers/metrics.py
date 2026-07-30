@@ -72,6 +72,9 @@ def receive_metrics(
     # Auto-block brute-force IPs in the background as well.
     # Автоблок IP-перебірників — теж у фоні.
     background.add_task(_auto_block_suspicious, server.id, server.name, payload)
+    # Persist attacker IPs for the block-status audit.
+    # Зберігаємо IP атакуючих для аудиту статусу блокування.
+    background.add_task(_track_brute_force, server.id, payload)
 
     return {"ok": True}
 
@@ -469,3 +472,65 @@ def _notify_auto_block(server, ip: str, count: int, usernames: list):
                       json=payload, timeout=10)
     except Exception as e:
         logging.getLogger(__name__).error("notify_auto_block error: %s", e)
+
+
+def _track_brute_force(server_id: str, payload: dict):
+    """EN: Persist external brute-force source IPs for the block-status audit.
+    UK: Зберігає зовнішні IP-джерела перебору для аудиту статусу блокування.
+
+    Merges suspicious_ips + brute_force_alerts, keeps external (non-private,
+    non-known) IPs, and upserts each with peak attempt count + last_seen.
+    Об'єднує suspicious_ips + brute_force_alerts, лишає зовнішні IP і
+    оновлює кожен: пік спроб + last_seen.
+    """
+    import ipaddress
+    from models import BruteForceIp
+
+    entries: dict = {}
+    for e in (payload.get("suspicious_ips") or []) + (payload.get("brute_force_alerts") or []):
+        ip = (e.get("ip") or "").strip()
+        if not ip or e.get("is_known_network"):
+            continue
+        try:
+            if ipaddress.ip_address(ip).is_private:
+                continue
+        except ValueError:
+            continue
+        cur = entries.setdefault(ip, {"count": 0, "users": set()})
+        cur["count"] = max(cur["count"], e.get("count", 0))
+        cur["users"].update(e.get("usernames") or [])
+
+    if not entries:
+        return
+
+    db = None
+    try:
+        db = next(get_db())
+        now = datetime.utcnow()
+        for ip, info in entries.items():
+            row = (db.query(BruteForceIp)
+                   .filter(BruteForceIp.server_id == server_id, BruteForceIp.ip == ip)
+                   .first())
+            if row:
+                row.attempts = max(row.attempts or 0, info["count"])
+                row.last_seen = now
+                merged = set(row.usernames or []) | info["users"]
+                row.usernames = list(merged)[:10]
+            else:
+                db.add(BruteForceIp(
+                    server_id=server_id, ip=ip,
+                    attempts=info["count"],
+                    usernames=list(info["users"])[:10],
+                    first_seen=now, last_seen=now,
+                ))
+        db.commit()
+    except Exception as e:
+        if db is not None:
+            db.rollback()
+        logger.error("track_brute_force error: %s", e)
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
