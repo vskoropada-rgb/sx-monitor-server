@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"],
 
 # Latest known agent version — used to flag outdated agents in the overview.
 # Остання відома версія агента — для позначення застарілих агентів в overview.
-LATEST_AGENT_VERSION = "1.5.0"
+LATEST_AGENT_VERSION = "1.6.0"
 
 # A server is considered online if its last_seen is within this window.
 # Сервер вважається онлайн якщо last_seen в межах цього вікна.

@@ -103,9 +103,75 @@ def _extract_ip_from_strings(strings: list, event_id: int) -> str:
     return "unknown"
 
 
+def _get_rdp_connection_ips(window_min: int) -> dict:
+    """Count RDP connection attempts per source IP via Event 1149.
+    Рахує RDP-підключення по IP джерела через Event 1149.
+
+    Reads the modern channel
+    Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational
+    (needs the EvtQuery API — the legacy ReadEventLog cannot read it). Event
+    1149's Param3 is the client source address. Legitimate users connect once
+    or twice; an IP with many connections in the window is brute-forcing. This
+    recovers the attacker IP even when 4625 logs the failure without one.
+
+    Читає сучасний канал TerminalServices-RemoteConnectionManager/Operational
+    (потрібен EvtQuery, legacy ReadEventLog його не бачить). Param3 події 1149 —
+    IP джерела. Відновлює IP атакуючого навіть коли 4625 його не містить.
+    """
+    counts: defaultdict = defaultdict(int)
+    try:
+        import win32evtlog
+    except ImportError:
+        return counts
+
+    channel = ("Microsoft-Windows-TerminalServices-"
+               "RemoteConnectionManager/Operational")
+    ms = int(window_min) * 60 * 1000
+    query = (f"*[System[(EventID=1149) and "
+             f"TimeCreated[timediff(@SystemTime) <= {ms}]]]")
+    try:
+        h = win32evtlog.EvtQuery(
+            channel,
+            win32evtlog.EvtQueryChannelPath | win32evtlog.EvtQueryReverseDirection,
+            query,
+        )
+    except Exception as e:
+        logger.debug("1149 EvtQuery failed (%s): %s", channel, e)
+        return counts
+
+    processed = 0
+    try:
+        while processed < 3000:   # safety cap under heavy floods / запобіжник
+            try:
+                events = win32evtlog.EvtNext(h, 50)
+            except Exception:
+                break
+            if not events:
+                break
+            for ev in events:
+                processed += 1
+                try:
+                    xml = win32evtlog.EvtRender(ev, win32evtlog.EvtRenderEventXml)
+                    m = re.search(r"<Param3>([^<]+)</Param3>", xml)
+                    if not m:
+                        continue
+                    ip = m.group(1).replace("::ffff:", "").strip()
+                    if ip and ip not in _BAD_IPS and (_IP_RE.match(ip) or ":" in ip):
+                        counts[ip] += 1
+                except Exception:
+                    continue
+    finally:
+        try:
+            win32evtlog.EvtClose(h)
+        except Exception:
+            pass
+
+    return counts
+
+
 def collect_brute_force(config: dict) -> dict:
-    """Detect password brute-force via Event IDs 4625 (NTLM) + 4771 (Kerberos).
-    Виявляє перебір паролів через Event ID 4625 (NTLM) + 4771 (Kerberos)."""
+    """Detect password brute-force via 4625 (NTLM) + 4771 (Kerberos) + RDP 1149.
+    Виявляє перебір паролів через 4625 (NTLM) + 4771 (Kerberos) + RDP 1149."""
     window_min = int(config.get("BRUTE_FORCE_WINDOW_MIN", 10))
     threshold = int(config.get("BRUTE_FORCE_THRESHOLD", 5))
     local_threshold = int(config.get("BRUTE_FORCE_LOCAL_THRESHOLD", 20))
@@ -144,50 +210,68 @@ def collect_brute_force(config: dict) -> dict:
                 len(events), window_min, len(ip_attempts),
                 {ip: len(u) for ip, u in ip_attempts.items()})
 
-    alerts = []
-    suspicious_ips = []  # real external IPs only (for block button) / лише реальні зовнішні IP
-    local_failed = 0     # local logins without IP / локальні входи без IP
+    # Aggregate failed logins per source IP; keep local (no-IP) failures apart.
+    # Then fold in RDP connection floods (Event 1149), which recover the source
+    # IP when 4625 logs the failure without one (the FASADE case).
+    # Агрегуємо невдалі входи по IP; локальні (без IP) — окремо. Далі додаємо
+    # RDP-підключення з Event 1149 — вони відновлюють IP, коли 4625 його не має.
+    combined: dict = {}   # ip -> {"count", "users": set, "wks": set, "is_known"}
+    local_failed = 0
+    local_users: list = []
+
+    def _note(ip: str, cnt: int, users, wks) -> None:
+        if not ip or ip in _BAD_IPS:
+            return
+        try:
+            is_known = any(ipaddress.ip_address(ip) in n for n in known_networks)
+        except ValueError:
+            return
+        e = combined.get(ip)
+        if e is None:
+            combined[ip] = {"count": cnt, "users": set(users),
+                            "wks": set(wks), "is_known": is_known}
+        else:
+            e["count"] = max(e["count"], cnt)   # strongest signal across sources
+            e["users"].update(users)
+            e["wks"].update(wks)
 
     for ip, users in ip_attempts.items():
-        count = len(users)
-        real_ip = ip not in ("unknown", "", "-")
-
-        if not real_ip:
-            local_failed += count
-            # Local logins — alert only at very high counts (service accounts, domain auth).
-            # Локальні логіни — алерт тільки при дуже великій кількості (сервісні акаунти).
-            if count >= local_threshold:
-                alerts.append({
-                    "ip": "",
-                    "count": count,
-                    "usernames": list(dict.fromkeys(users))[:5],
-                    "workstations": [],
-                    "is_known_network": True,  # not blockable — no external IP / не блокуємо
-                })
+        if ip in ("unknown", "", "-"):
+            local_failed += len(users)
+            local_users.extend(users)
             continue
+        _note(ip, len(users), users, ip_workstations.get(ip, set()))
 
-        is_known = False
-        try:
-            ip_obj = ipaddress.ip_address(ip)
-            is_known = any(ip_obj in net for net in known_networks)
-        except Exception:
-            pass
+    # Event 1149 — RDP connection attempts per source IP (recovers no-IP 4625).
+    # Event 1149 — RDP-підключення по IP (відновлює IP, якого нема в 4625).
+    for ip, cnt in _get_rdp_connection_ips(window_min).items():
+        _note(ip, cnt, [], [])
 
+    alerts = []
+    suspicious_ips = []  # real external IPs only / лише реальні зовнішні IP
+    for ip, e in combined.items():
         entry = {
             "ip": ip,
-            "count": count,
-            "usernames": list(dict.fromkeys(users))[:5],
-            "workstations": list(ip_workstations.get(ip, set()))[:3],
-            "is_known_network": is_known,
+            "count": e["count"],
+            "usernames": list(e["users"])[:5],
+            "workstations": list(e["wks"])[:3],
+            "is_known_network": e["is_known"],
         }
-
-        if count >= threshold:
+        if e["count"] >= threshold:
             alerts.append(entry)
-
-        # Block-button candidates: real external IPs only.
-        # Кандидати для блокування: лише реальні зовнішні IP.
-        if not is_known:
+        if not e["is_known"]:            # external → eligible for auto-block
             suspicious_ips.append(entry)
+
+    # Local (no-IP) failures still alert when very high — nothing to block.
+    # Локальні (без IP) — алерт при дуже великій кількості, блокувати нема кого.
+    if local_failed >= local_threshold:
+        alerts.append({
+            "ip": "",
+            "count": local_failed,
+            "usernames": list(dict.fromkeys(local_users))[:5],
+            "workstations": [],
+            "is_known_network": True,
+        })
 
     alerts.sort(key=lambda x: x["count"], reverse=True)
     suspicious_ips.sort(key=lambda x: x["count"], reverse=True)
