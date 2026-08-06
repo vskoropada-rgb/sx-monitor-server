@@ -196,6 +196,13 @@ class BruteForceIp(Base):
     usernames  = Column(JSONB)                # observed target usernames / цільові юзери
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen  = Column(DateTime, default=datetime.utcnow)
+    # Rolling 24h accumulator — catches "low-and-slow" (5 tries, pause, 5 more).
+    # total_24h grows only by the increase over last_window_count, so rolling
+    # 10-min reports are not double-counted; it resets when window_reset_at ages out.
+    # Ковзний лічильник за 24 год — ловить «low-and-slow» (5 спроб, пауза, ще 5).
+    total_24h         = Column(Integer, default=0)   # cumulative attempts in 24h / сумарно за 24 год
+    last_window_count = Column(Integer, default=0)   # last reported window count / останній count вікна
+    window_reset_at   = Column(DateTime, default=datetime.utcnow)  # 24h window start / початок вікна 24 год
 
 
 class LoginLog(Base):

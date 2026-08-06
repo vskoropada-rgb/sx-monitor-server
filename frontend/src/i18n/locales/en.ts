@@ -99,7 +99,7 @@ export const enStrings: Record<keyof typeof ukStrings, string> = {
   "brute.title": "Password brute-force attempts",
   "brute.empty": "No brute-force attempts recorded",
   "brute.colIp": "IP",
-  "brute.colAttempts": "Attempts",
+  "brute.colAttempts": "Attempts (24h)",
   "brute.colUsers": "Logins",
   "brute.colLastSeen": "Last seen",
   "brute.colStatus": "Status",

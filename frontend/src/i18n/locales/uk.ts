@@ -99,7 +99,7 @@ export const ukStrings = {
   "brute.title": "Спроби перебору паролів",
   "brute.empty": "Спроб перебору не зафіксовано",
   "brute.colIp": "IP",
-  "brute.colAttempts": "Спроби",
+  "brute.colAttempts": "Спроби (24г)",
   "brute.colUsers": "Логіни",
   "brute.colLastSeen": "Останній раз",
   "brute.colStatus": "Статус",

@@ -596,7 +596,8 @@ def _handle_bruteforce_audit(chat_id, topic_id, message_id, server: Server):
         snap = (db.query(MetricsSnapshot)
                 .filter(MetricsSnapshot.server_id == server.id).first())
         blocked = set((snap.data or {}).get("blocked_ips", [])) if snap else set()
-        items = [(r.ip, r.attempts, r.ip in blocked) for r in rows]
+        items = [(r.ip, (r.total_24h if r.total_24h is not None else r.attempts),
+                  r.ip in blocked) for r in rows]
     finally:
         db.close()
 
@@ -611,7 +612,7 @@ def _handle_bruteforce_audit(chat_id, topic_id, message_id, server: Server):
     for ip, attempts, is_blocked in items:
         mark = "🔒" if is_blocked else "⚠️"
         suffix = " — заблоковано" if is_blocked else ""
-        lines.append(f"{mark} <code>{ip}</code> · {attempts} спроб{suffix}")
+        lines.append(f"{mark} <code>{ip}</code> · {attempts} спроб/24г{suffix}")
         # Block button only for not-yet-blocked IPs (cap to keep keyboard small).
         # Кнопка блокування лише для незаблокованих (обмежуємо розмір клавіатури).
         if not is_blocked and len(btns) < 8:

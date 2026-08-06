@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # IP/CIDR, які ніколи не блокуємо (офіс, VPN), через кому. Приватні мережі
     # RFC1918 не блокуються в будь-якому разі.
     auto_block_allowlist: str = ""
+    # Low-and-slow filter: also auto-block when cumulative attempts from one
+    # external IP within a rolling 24h window exceed this — catches attacks that
+    # stay under the per-window threshold (5 tries, pause an hour, 5 more…).
+    # Фільтр low-and-slow: автоблок і коли сумарно за ковзні 24 год з одного
+    # зовнішнього IP перевищено це число — ловить «5 спроб, пауза, ще 5».
+    auto_block_24h_threshold: int = 10
 
     # Shared secret for new agent registration (POST /api/servers/register).
     # Separate from secret_key so agents never see the master JWT key.

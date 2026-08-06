@@ -367,7 +367,7 @@ function BruteForceAudit({ serverId }: { serverId: string }) {
               {data.map((b) => (
                 <tr key={b.ip} className={cn("hover:bg-panel2/40", !b.blocked ? "bg-warn/5" : "")}>
                   <td className="px-4 py-2 font-mono text-xs">{b.ip}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs">{b.attempts}</td>
+                  <td className="px-4 py-2 text-right font-mono text-xs">{b.total_24h}</td>
                   <td className="px-4 py-2 text-xs text-muted truncate max-w-[180px]">
                     {b.usernames.length ? b.usernames.join(", ") : "—"}
                   </td>

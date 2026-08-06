@@ -44,6 +44,9 @@ def init_db():
             "ALTER TABLE servers  ADD COLUMN IF NOT EXISTS maintenance_until TIMESTAMP;",
             "ALTER TABLE servers  ADD COLUMN IF NOT EXISTS agent_version VARCHAR;",
             "ALTER TABLE alerts   ADD COLUMN IF NOT EXISTS acked_until TIMESTAMP;",
+            "ALTER TABLE brute_force_ips ADD COLUMN IF NOT EXISTS total_24h INTEGER DEFAULT 0;",
+            "ALTER TABLE brute_force_ips ADD COLUMN IF NOT EXISTS last_window_count INTEGER DEFAULT 0;",
+            "ALTER TABLE brute_force_ips ADD COLUMN IF NOT EXISTS window_reset_at TIMESTAMP DEFAULT NOW();",
             """CREATE TABLE IF NOT EXISTS rdp_log (
                 id SERIAL PRIMARY KEY,
                 server_id VARCHAR NOT NULL REFERENCES servers(id),

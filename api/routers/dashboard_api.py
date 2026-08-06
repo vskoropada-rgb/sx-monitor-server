@@ -348,6 +348,7 @@ def brute_force_audit(server_id: str, days: int = 30,
         {
             "ip":         r.ip,
             "attempts":   r.attempts,
+            "total_24h":  r.total_24h if r.total_24h is not None else r.attempts,
             "usernames":  r.usernames or [],
             "first_seen": r.first_seen.isoformat() if r.first_seen else None,
             "last_seen":  r.last_seen.isoformat() if r.last_seen else None,

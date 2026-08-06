@@ -69,12 +69,12 @@ def receive_metrics(
     # Run alert analysis in the background so the agent is not blocked.
     # Аналіз і відправка алертів — у фоні щоб не блокувати агента.
     background.add_task(_analyze_and_alert, server.id, server.name, payload)
-    # Auto-block brute-force IPs in the background as well.
-    # Автоблок IP-перебірників — теж у фоні.
-    background.add_task(_auto_block_suspicious, server.id, server.name, payload)
-    # Persist attacker IPs for the block-status audit.
-    # Зберігаємо IP атакуючих для аудиту статусу блокування.
+    # Persist attacker IPs first (updates the rolling 24h totals), then auto-block
+    # so the 24h low-and-slow trigger sees this poll's fresh counts.
+    # Спершу зберігаємо IP (оновлює лічильники за 24 год), потім автоблок —
+    # щоб 24-годинний тригер бачив свіжі дані цього циклу.
     background.add_task(_track_brute_force, server.id, payload)
+    background.add_task(_auto_block_suspicious, server.id, server.name, payload)
 
     return {"ok": True}
 
@@ -335,33 +335,26 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
     if not settings.auto_block_enabled:
         return
 
-    # Merge candidate IPs from both fields the agent may populate:
-    # suspicious_ips (external-only list) and brute_force_alerts (the list that
-    # drives the visible alert + manual block button). Keep the highest count.
-    # Об'єднуємо кандидатів з обох полів агента: suspicious_ips і
-    # brute_force_alerts (те, що показує алерт і кнопку). Беремо максимальний count.
-    candidates: dict = {}
+    # Burst candidates: high count within the current 10-min window. Merge both
+    # fields the agent may populate (suspicious_ips + brute_force_alerts).
+    # Кандидати-сплески: високий count у поточному 10-хв вікні (обидва поля).
+    burst: dict = {}
     for entry in (payload.get("suspicious_ips") or []) + (payload.get("brute_force_alerts") or []):
         ip = (entry.get("ip") or "").strip()
-        if not ip:
-            continue                       # local logins have no IP / локальні — без IP
-        if entry.get("is_known_network"):
-            continue                       # internal network — alert only / внутрішня — лише алерт
+        if not ip or entry.get("is_known_network"):
+            continue
         cnt = entry.get("count", 0)
-        prev = candidates.get(ip)
+        prev = burst.get(ip)
         if prev is None or cnt > prev["count"]:
-            candidates[ip] = {"count": cnt, "usernames": entry.get("usernames") or []}
+            burst[ip] = {"count": cnt, "usernames": entry.get("usernames") or []}
 
-    threshold = settings.auto_block_threshold
-    if not candidates:
-        return
-    logger.info("auto_block[%s]: candidates=%s threshold=%d",
-                server_name, {ip: c["count"] for ip, c in candidates.items()}, threshold)
+    threshold     = settings.auto_block_threshold
+    threshold_24h = settings.auto_block_24h_threshold
 
     db = None
     try:
         from routers.commands import create_command
-        from models import Command
+        from models import Command, BruteForceIp
 
         db = next(get_db())
         server = db.query(Server).filter(Server.id == server_id).first()
@@ -371,22 +364,43 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
         # Skip auto-actions while the server is in maintenance mode.
         # Не діємо, поки сервер у режимі обслуговування.
         if server.maintenance_until and server.maintenance_until > datetime.utcnow():
-            logger.info("auto_block[%s]: skipped — maintenance mode", server_name)
             return
 
         allow_nets      = settings.auto_block_networks
         already_blocked = set(payload.get("blocked_ips") or [])
 
-        for ip, info in candidates.items():
-            count = info["count"]
+        # Build the block list from two triggers, keyed by IP.
+        # reason ∈ {"burst", "24h"} — щоб у сповіщенні пояснити причину.
+        to_block: dict = {}
 
-            # Threshold is "more than N" — trigger strictly above it.
-            # Поріг — «більше за N» — спрацьовуємо строго вище.
-            if count <= threshold:
-                logger.info("auto_block[%s]: %s below threshold (%d<=%d)",
-                            server_name, ip, count, threshold)
-                continue
+        # Trigger 1 — burst: more than the per-window threshold right now.
+        # Тригер 1 — сплеск: понад поріг у поточному вікні.
+        for ip, info in burst.items():
+            if info["count"] > threshold:
+                to_block[ip] = {"count": info["count"],
+                                "usernames": info["usernames"], "reason": "burst"}
 
+        # Trigger 2 — low-and-slow: cumulative 24h total over the threshold.
+        # Тригер 2 — повільний перебір: сумарно за 24 год понад поріг.
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        slow = (
+            db.query(BruteForceIp)
+            .filter(BruteForceIp.server_id == server_id,
+                    BruteForceIp.total_24h >= threshold_24h,   # ">=": "5 + pause + 5" = 10 trips it
+                    BruteForceIp.last_seen >= cutoff)
+            .all()
+        )
+        for r in slow:
+            if r.ip not in to_block:
+                to_block[r.ip] = {"count": r.total_24h,
+                                  "usernames": r.usernames or [], "reason": "24h"}
+
+        if not to_block:
+            return
+        logger.info("auto_block[%s]: to_block=%s", server_name,
+                    {ip: (i["count"], i["reason"]) for ip, i in to_block.items()})
+
+        for ip, info in to_block.items():
             try:
                 ip_obj = ipaddress.ip_address(ip)
             except ValueError:
@@ -422,8 +436,9 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
                 continue
 
             create_command(db, server_id, "block_ip", {"ip": ip})
-            _notify_auto_block(server, ip, count, info["usernames"])
-            logger.info("auto_block[%s]: BLOCKED %s (%d attempts)", server_name, ip, count)
+            _notify_auto_block(server, ip, info["count"], info["usernames"], info["reason"])
+            logger.info("auto_block[%s]: BLOCKED %s (%s, %d)",
+                        server_name, ip, info["reason"], info["count"])
 
     except Exception as e:
         logger.error("auto_block error: %s", e)
@@ -435,7 +450,7 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
                 pass
 
 
-def _notify_auto_block(server, ip: str, count: int, usernames: list):
+def _notify_auto_block(server, ip: str, count: int, usernames: list, reason: str = "burst"):
     """EN: Send a Telegram notice about an automatic block, with an unblock button.
     UK: Сповіщення в Telegram про автоблокування, з кнопкою розблокування."""
     import json
@@ -449,9 +464,14 @@ def _notify_auto_block(server, ip: str, count: int, usernames: list):
         return
 
     users = ", ".join(usernames[:5]) if usernames else "—"
+    # "24h" = low-and-slow (cumulative over a day); "burst" = a single window.
+    # «24h» = повільний перебір за добу; «burst» = сплеск в одному вікні.
+    detail = (f"{count} спроб за 24 год (повільний перебір)"
+              if reason == "24h"
+              else f"{count} невдалих спроб входу")
     text = (
         f"🚫 <b>Автоблокування — {server.name}</b>\n"
-        f"IP <code>{ip}</code> заблоковано назавжди після {count} невдалих спроб входу.\n"
+        f"IP <code>{ip}</code> заблоковано назавжди після {detail}.\n"
         f"Логіни: {users}"
     )
     keyboard = {"inline_keyboard": [[
@@ -508,18 +528,36 @@ def _track_brute_force(server_id: str, payload: dict):
         db = next(get_db())
         now = datetime.utcnow()
         for ip, info in entries.items():
+            new_count = info["count"]
             row = (db.query(BruteForceIp)
                    .filter(BruteForceIp.server_id == server_id, BruteForceIp.ip == ip)
                    .first())
             if row:
-                row.attempts = max(row.attempts or 0, info["count"])
+                # Reset the rolling 24h accumulator once the window ages out.
+                # Скидаємо ковзний лічильник за 24 год, коли вікно застаріло.
+                if not row.window_reset_at or (now - row.window_reset_at) > timedelta(hours=24):
+                    row.total_24h = 0
+                    row.last_window_count = 0
+                    row.window_reset_at = now
+                # Accumulate only the increase over the last reported window count,
+                # so rolling 10-min reports of the same burst are not double-counted.
+                # Додаємо лише приріст над попереднім count вікна — щоб ковзні
+                # 10-хв звіти однієї серії не рахувались двічі.
+                prev = row.last_window_count or 0
+                if new_count > prev:
+                    row.total_24h = (row.total_24h or 0) + (new_count - prev)
+                row.last_window_count = new_count
+                row.attempts = max(row.attempts or 0, new_count)
                 row.last_seen = now
                 merged = set(row.usernames or []) | info["users"]
                 row.usernames = list(merged)[:10]
             else:
                 db.add(BruteForceIp(
                     server_id=server_id, ip=ip,
-                    attempts=info["count"],
+                    attempts=new_count,
+                    total_24h=new_count,
+                    last_window_count=new_count,
+                    window_reset_at=now,
                     usernames=list(info["users"])[:10],
                     first_seen=now, last_seen=now,
                 ))

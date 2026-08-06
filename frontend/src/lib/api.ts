@@ -115,6 +115,7 @@ export interface RdpSessionEntry {
 export interface BruteForceEntry {
   ip: string;
   attempts: number;
+  total_24h: number;
   usernames: string[];
   first_seen: string | null;
   last_seen: string | null;
