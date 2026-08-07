@@ -450,6 +450,44 @@ def _auto_block_suspicious(server_id: str, server_name: str, payload: dict):
                 pass
 
 
+def _flag_emoji(country_code: str) -> str:
+    """Turn a 2-letter ISO country code into its flag emoji ('RU' → '🇷🇺').
+    Перетворює 2-літерний ISO-код країни на емодзі прапора ('RU' → '🇷🇺')."""
+    cc = (country_code or "").strip().upper()
+    if len(cc) != 2 or not cc.isalpha():
+        return ""
+    return chr(0x1F1E6 + ord(cc[0]) - 65) + chr(0x1F1E6 + ord(cc[1]) - 65)
+
+
+def _geoip_country(ip: str) -> str:
+    """EN: Best-effort country for an IP → '🇷🇺 Russia', or '' on failure.
+    UK: Best-effort країна за IP → '🇷🇺 Russia', або '' при невдачі.
+
+    Only called when actually blocking (rare), so a per-lookup HTTP call to a
+    free no-key geolocation service is fine. Two providers for redundancy.
+    Викликається лише при блокуванні (рідко), тож HTTP-запит до безкоштовного
+    сервісу без ключа прийнятний. Два провайдери для надійності.
+    """
+    import requests
+
+    # Provider 1 — ipwho.is (HTTPS, no key).
+    try:
+        d = requests.get(f"https://ipwho.is/{ip}", timeout=6).json()
+        if d.get("success"):
+            return f"{_flag_emoji(d.get('country_code', ''))} {d.get('country', '')}".strip()
+    except Exception:
+        pass
+    # Provider 2 — ip-api.com (fallback).
+    try:
+        d = requests.get(f"http://ip-api.com/json/{ip}",
+                         params={"fields": "status,country,countryCode"}, timeout=6).json()
+        if d.get("status") == "success":
+            return f"{_flag_emoji(d.get('countryCode', ''))} {d.get('country', '')}".strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _notify_auto_block(server, ip: str, count: int, usernames: list, reason: str = "burst"):
     """EN: Send a Telegram notice about an automatic block, with an unblock button.
     UK: Сповіщення в Telegram про автоблокування, з кнопкою розблокування."""
@@ -469,9 +507,14 @@ def _notify_auto_block(server, ip: str, count: int, usernames: list, reason: str
     detail = (f"{count} спроб за 24 год (повільний перебір)"
               if reason == "24h"
               else f"{count} невдалих спроб входу")
+    # Country of the attacker IP (best-effort; omitted if lookup fails).
+    # Країна атакуючого IP (best-effort; пропускається при невдачі).
+    country = _geoip_country(ip)
+    ip_line = f"IP <code>{ip}</code>" + (f" · {country}" if country else "")
     text = (
         f"🚫 <b>Автоблокування — {server.name}</b>\n"
-        f"IP <code>{ip}</code> заблоковано назавжди після {detail}.\n"
+        f"{ip_line}\n"
+        f"Заблоковано назавжди після {detail}.\n"
         f"Логіни: {users}"
     )
     keyboard = {"inline_keyboard": [[
